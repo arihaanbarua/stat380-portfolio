@@ -1,0 +1,306 @@
+---
+title: "Problem Set 4"
+author: "Arihaan Barua"
+date: now
+format: html
+editor: source
+self-contained: true
+---
+
+## Question 1
+
+Part (a)
+
+```{r}
+R2 <- function(y, yhat) {
+  rss <- sum((y - yhat)^2)
+  tss <- sum((y - mean(y))^2)
+  1 - (rss/tss)}
+```
+
+Part (b)
+
+```{r}
+MSE <- function(y, yhat) {
+  mean((y - yhat)^2)}
+RMSE <- function(y, yhat) {
+  sqrt(MSE(y, yhat))}
+MAE <- function(y, yhat) {
+  mean(abs(y - yhat))}
+```
+
+Part (c)\
+1. charges \~ age\
+2. charges \~ age + bmi\
+3. charges \~ age + bmi + smoker\
+4. charges \~ age + bmi + smoker + children\
+5. charges \~ age + sex + bmi + children + smoker + region.
+
+Part (d)
+
+```{r}
+#| echo: false
+insurance <- read.csv("/Users/aribarua/Desktop/R Docs/Insurance.csv")
+insurance <- insurance[!is.na(insurance$charges), ]
+
+n <- nrow(insurance)
+train_index <- sample(1:n, size = floor(0.8 * n), replace = FALSE)
+
+train <- insurance[train_index, ]
+validation <- insurance[-train_index, ]
+
+m1 <- lm(charges ~ age, data = train)
+m2 <- lm(charges ~ age + bmi, data = train)
+m3 <- lm(charges ~ age + bmi + smoker, data = train)
+m4 <- lm(charges ~ age + bmi + smoker + children, data = train)
+m5 <- lm(charges ~ age + sex + bmi + children + smoker + region, data = train)
+
+models <- list(m1, m2, m3, m4, m5)
+
+train_R2 <- sapply(models, function(mod) {
+  R2(train$charges, predict(mod, train))})
+
+train_R2_adj <- sapply(models, function(mod) {
+  summary(mod)$adj.r.squared})
+
+cat("R^2 for models 1-5:", train_R2, "\n")
+cat("Adjusted R^2 for models 1-5:", train_R2_adj, "\n")
+```
+
+Part (e)
+
+```{r}
+#| echo: false
+val_metrics <- data.frame(
+  Predictors = c("age",
+                 "age + bmi",
+                 "age + bmi + smoker",
+                 "age + bmi + smoker + children",
+                 "age + sex + bmi + children + smoker + region"),
+  Validation_MSE = NA_real_,
+  Validation_RMSE = NA_real_,
+  Validation_MAE = NA_real_)
+
+for (i in seq_along(models)) {
+  yhat_val <- predict(models[[i]], newdata = validation)
+  val_metrics$Validation_MSE[i]  <- MSE(validation$charges, yhat_val)
+  val_metrics$Validation_RMSE[i] <- RMSE(validation$charges, yhat_val)
+  val_metrics$Validation_MAE[i]  <- MAE(validation$charges, yhat_val)}
+
+val_metrics
+```
+
+Part (f)\
+The model using age + bmi + smoker + children gives you the best MSE (34948041)
+
+## Question 2
+
+The equation from the lm() summary output is:\
+Price = 18.69496 − 0.07807(Miles) + 9.45872(ModelTacoma) − 11.02341(ModelVolt)
+
+```{r}
+#| echo: false
+val <- read.csv("https://raw.githubusercontent.com/maxwellhahn/maxwellhahn/refs/heads/main/Validation_set.csv")
+
+val_clean <- val[!is.na(val$Miles) & !is.na(val$Price), ]
+
+val_clean$ModelTacoma <- ifelse(val_clean$Model == "Tacoma", 1, 0)
+val_clean$ModelVolt   <- ifelse(val_clean$Model == "Volt", 1, 0)
+
+val_clean$Predicted_Price <- 
+  18.69496 - 
+  0.07807 * val_clean$Miles + 
+  9.45872 * val_clean$ModelTacoma - 
+  11.02341 * val_clean$ModelVolt
+
+cat("Validation Predictions: ", val_clean$Predicted_Price, "\n")
+rmse <- sqrt(mean((val_clean$Price - val_clean$Predicted_Price)^2))
+cat("RMSE: ", rmse)
+```
+
+## Question 3
+
+Part (a)
+
+```{r}
+NOVA <- read.csv("/Users/aribarua/Desktop/R Docs/NOVA.csv")
+NOVA2 <- NOVA
+```
+
+Part (b)
+
+```{r}
+table(NOVA2$CountySchool)
+library(ggplot2)
+```
+
+Part (c)
+
+```{r}
+#| echo: false
+# Create histogram of Prices and highlight outliers
+ggplot(data = NOVA2, mapping = aes(x = Price)) +
+geom_histogram(binwidth = 200000, color = "black", fill = "lightblue") +
+labs(x = "Price (in Dollars)",
+y = "Number of Properties") +
+#Removes scientific notation from axis labels
+scale_x_continuous(labels = scales::comma) +
+geom_vline(xintercept = 3000000, color = "red", linewidth = 2) +
+geom_point(data = NOVA2[NOVA2$Price > 3000000,],aes(x = Price, y = 0),
+color = "red", shape = 1, size = 10)
+```
+
+Part (d)
+
+```{r}
+#| echo: false
+(over3M <- NOVA2[NOVA2$Price > 3000000, ])
+```
+
+These \$3M+ homes have very large LivingSQFT and/or LotSize, and they are concentrated in Arlington and Fairfax counties.
+
+Part (e)
+
+```{r}
+NOVA2 <- NOVA2[NOVA2$Price <= 3000000 & !(NOVA2$CountySchool %in% c("LOUDOUN COUNTY PUBLIC SCHOOLS", "PRINCE WILLIAM COUNTY PUBLIC SCHOOLS")),]
+nrow(NOVA2)
+```
+
+Part (f)
+
+```{r}
+#| echo: false
+NOVA2$logPrice <- log(NOVA2$Price)
+ggplot(NOVA2, aes(x = logPrice)) +
+  geom_histogram(binwidth = 0.1, color = "black", fill = "blue") +
+  labs(x = "log(Price)", y = "Number of Properties")
+```
+
+This distribution is much more symmetric/normal than before the outliers were removed.
+
+Part (g)
+
+```{r}
+NOVA2$Single <- ifelse(NOVA2$ListingType == "Single Family", 1, 0)
+
+NOVA2$Arlington <- ifelse(NOVA2$CountySchool == "ARLINGTON COUNTY PUBLIC SCHOOLS", 1, 0)
+```
+
+## Question 4
+
+Part (a)
+
+```{r}
+ggplot(NOVA2, aes(x = Bathrooms, y = logPrice)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  labs(title = "logPrice vs Bathrooms",
+       x = "Bathrooms",
+       y = "log(Price)")
+```
+
+Yes, there's a pretty clear linear relationship.
+
+Part (b)
+
+```{r}
+(cor(NOVA2$logPrice, NOVA2$Bathrooms))
+```
+
+Part (c)
+
+```{r}
+model_bath <- lm(logPrice ~ Bathrooms, data = NOVA2)
+summary(model_bath)
+```
+
+logPrice = 12.567869 + 0.249756(Bathrooms)
+
+Part (d)
+
+```{r}
+summary(model_bath)$r.squared
+```
+About 47.68537% of the variation in logPrice is explained by the number of bathrooms.
+
+Part (e)
+
+```{r}
+summary(model_bath)$sigma
+```
+On average, logPrice deviates from the regression line by about 0.36397 units (in log-dollars).
+
+Part (f)
+
+```{r}
+#| echo: false
+# Largest Bathrooms
+max_bath_index <- which.max(NOVA2$Bathrooms)
+max_obs <- NOVA2[max_bath_index, ]
+
+#Collecting Predicted Values
+predicted <- predict(model_bath, newdata = max_obs)
+actual <- max_obs$logPrice
+
+ggplot(NOVA2, aes(x = Bathrooms, y = logPrice)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  geom_segment(aes(x = max_obs$Bathrooms,
+                   xend = max_obs$Bathrooms,
+                   y = predicted,
+                   yend = actual),
+               color = "red",
+               linewidth = 1.5) +
+  labs(title = "Residual for Largest Bathrooms Observation",
+       x = "Bathrooms",
+       y = "log(Price)")
+```
+
+## Question 5
+
+Part (a)
+
+```{r}
+#| echo: false
+m_q5 <- lm(logPrice ~ Bathrooms + Arlington, data = NOVA2)
+summary(m_q5)
+```
+logPrice = 12.483495 + 0.238603(Bathrooms) + 0.478650(Arlington)
+
+Part (b)
+
+logPrice = 12.483495 + 0.238603(2) + 0.478650(0) = 12.483495 + 0.477206 + 0 = 12.960701
+
+Part (c)
+
+```{r}
+(bath_beta <- coef(m_q5)["Bathrooms"])
+```
+Holding Arlington constant, a 1-unit increase in Bathrooms changes expected logPrice by 0.2386029 on average.
+
+Part (d)
+
+```{r}
+(arl_beta <- coef(m_q5)["Arlington"])
+```
+Holding Bathrooms constant, Arlington homes (Arlington=1) have expected logPrice higher by 0.4786502 than Fairfax (Arlington=0).
+
+Part (e)
+
+```{r}
+confint(m_q5, parm = "Bathrooms", level = 0.90)
+```
+
+Part (f)
+
+```{r}
+r2 <- summary(m_q5)$r.squared
+cat("R^2 =", r2)
+```
+
+Part (g)
+
+```{r}
+r2_adj <- summary(m_q5)$adj.r.squared
+cat("Adjusted R^2 =", r2_adj, "\n")
+```

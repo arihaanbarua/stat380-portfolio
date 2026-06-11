@@ -1,0 +1,301 @@
+---
+title: "Problem Set 6"
+author: "Arihaan Barua"
+format: html
+editor: visual
+---
+
+## Question 1
+
+Part (a)
+
+```{r}
+MLB <- read.csv("/Users/aribarua/Desktop/R Docs/MLB.csv")
+MLB <- MLB[, !(names(MLB) %in% "PlayerName")]
+MLB <- na.omit(MLB)
+
+# dim(MLB)
+```
+
+Part (b)
+
+```{r}
+library(glmnet)
+
+X <- model.matrix(Salary ~ ., data = MLB)[, -1]
+
+y <- as.numeric(as.character(MLB$Salary))
+```
+
+Part (c)
+
+```{r}
+set.seed(52)
+
+train_idx <- sample(1:nrow(MLB), size = floor(0.85 * nrow(MLB)))
+
+X_train <- X[train_idx, ]
+X_valid <- X[-train_idx, ]
+
+y_train <- y[train_idx]
+y_valid <- y[-train_idx]
+```
+
+Part (d)
+
+```{r}
+set.seed(2020)
+
+cv_lasso <- cv.glmnet(X_train, y_train, alpha = 1)
+
+(lambda_min <- cv_lasso$lambda.min)
+(lambda_1se <- cv_lasso$lambda.1se)
+
+coef_min <- coef(cv_lasso, s = "lambda.min")
+coef_1se <- coef(cv_lasso, s = "lambda.1se")
+
+coef_min[coef_min != 0]
+coef_1se[coef_1se != 0]
+```
+
+Part (e)
+
+```{r}
+pred_min <- predict(cv_lasso, s = "lambda.min", newx = X_valid)
+pred_1se <- predict(cv_lasso, s = "lambda.1se", newx = X_valid)
+
+rmse <- function(actual, pred) {
+  sqrt(mean((actual - pred)^2))
+}
+
+(rmse_min <- rmse(y_valid, pred_min))
+(rmse_1se <- rmse(y_valid, pred_1se))
+```
+
+Part (f)
+
+```{r}
+library(MASS)
+
+full_model <- lm(Salary ~ ., data = MLB[train_idx, ])
+
+# AIC
+back_model <- step(full_model, direction = "backward")
+
+summary(back_model)
+```
+
+AIC was used so that backward elimination kept more relevant predictors and better captures the underlying relationship, rather than being overly restrictive like BIC. Using backward elimination with AIC, the final model uses the variables: AtBat, Hits, Walks, CAtBat, CRuns, CRBI, CWalks, Division, PutOuts, and Assists. These predictors were selected because they minimized AIC, balancing model fit and complexity.
+
+Part (g)
+
+```{r}
+pred_back <- predict(back_model, newdata = MLB[-train_idx, ])
+
+(rmse_back <- rmse(y_valid, pred_back))
+```
+
+Part (f)
+
+Based on the validation RMSE values, the backward elimination model performed the best, with an RMSE of 234.9963, which is lower than both the min (240.2803) and max (280.3961) LASSO models. This shows that backward elimination provided the most accurate predictions on the validation set.
+
+## Question 2
+
+```{r}
+# ── Data generation ──────────────────────────────────────────────────────────
+set.seed(16802)
+n <- 250
+x <- runif(n, min = -5, max = 15)
+y <- ifelse(
+x < 0,
+20 * sin(x) + rnorm(n, 0, 2),
+ifelse(
+x < 7,
+-0.5 * x^2 + 3.5 * x + 5 + rnorm(n, 0, 3),
+ifelse(
+x < 9,
+rnorm(n, 10, 8),
+-3 * (x - 9) + sample(c(-8, 8), n, replace = TRUE,
+prob = c(0.5, 0.5)) + rnorm(n, 0, 2)
+)
+)
+)
+df <- data.frame(x = x, y = y)
+```
+
+Part (a)
+
+```{r}
+library(ggplot2)
+ggplot(df, aes(x = x, y = y)) +
+  geom_point(color = "blue") +
+  labs(title = "Scatterplot of y vs x",
+       x = "x",
+       y = "y")
+```
+
+Part (b)
+
+```{r}
+lm_fit <- lm(y ~ x, data = df)
+
+coef(lm_fit)
+summary(lm_fit)$r.squared
+summary(lm_fit)
+```
+
+Part (c)
+
+```{r}
+knn_predict <- function(x_new, x, y, k) {
+
+  dists <- abs(x - x_new)
+
+  idx <- order(dists)[1:k]
+
+  mean(y[idx])
+}
+```
+
+Part (d)
+
+```{r}
+x_grid <- seq(min(df$x), max(df$x), length.out = 300)
+
+knn_preds <- sapply(x_grid, knn_predict,
+                    x = df$x,
+                    y = df$y,
+                    k = 10)
+```
+
+Part (e)
+
+```{r}
+lm_preds <- predict(lm_fit, newdata = data.frame(x = x_grid))
+
+plot(df$x, df$y, col = "black", pch = 16,
+     xlab = "df$x", ylab = "df$y")
+
+lines(x_grid, lm_preds, col = "red", lwd = 2)
+lines(x_grid, knn_preds, col = "blue", lwd = 2)
+
+legend("topright",
+       legend = c("Linear Regression", "kNN (k=10)"),
+       col = c("red", "blue"),
+       lwd = 2,
+       bty = "n")
+```
+
+Part (f)
+
+1\. The linear regression model performs most poorly in the strongly nonlinear regions, especially for negative x values and around the sharp bends near x = 0 and x = 9.
+
+2\. Linear regression is parametric because it assumes a specific functional form, here a straight-line relationship between x and y. kNN is non-parametric because it does not assume a fixed equation and instead lets the data determine the shape of the fit. A practical trade-off is that linear regression is simpler and easier to interpret, while kNN is more flexible but can be less stable and harder to interpret.
+
+3\. If k decreases from 10 to 1, the kNN curve becomes much more jagged and closely tracks individual observations. This increases flexibility, but it also raises the risk of overfitting.
+
+## Question 3
+
+Part (a)
+
+```{r}
+NOVA <- read.csv("/Users/aribarua/Desktop/R Docs/NOVA.csv")
+NOVA$logPrice <- log(NOVA$Price)
+```
+
+Part (b)
+
+```{r}
+NOVA$SingleFamHome <- ifelse(NOVA$ListingType == "Single Family", 1, 0)
+```
+
+Part (c)
+
+```{r}
+x_vars <- c("Bedrooms", "Bathrooms", "LivingSQFT", "Age", "DistToWH", "LotSize", "Floors", "Garage", "SingleFamHome")
+
+X <- NOVA[, x_vars]
+y <- NOVA$logPrice
+
+X_scaled <- scale(X)
+```
+
+Part (d)
+
+```{r}
+set.seed(380)
+
+train_idx <- sample(1:nrow(NOVA), size = floor(0.75 * nrow(NOVA)))
+
+X_train <- X_scaled[train_idx, ]
+X_valid <- X_scaled[-train_idx, ]
+
+y_train <- y[train_idx]
+y_valid <- y[-train_idx]
+```
+
+Part (e)
+
+```{r}
+train_df <- data.frame(y_train, X_train)
+valid_df <- data.frame(X_valid)
+
+mlr_model <- lm(y_train ~ ., data = train_df)
+
+mlr_preds <- predict(mlr_model, newdata = valid_df)
+
+rmse <- function(actual, pred) {
+  sqrt(mean((actual - pred)^2))
+}
+
+(rmse_mlr <- rmse(y_valid, mlr_preds))
+```
+
+Part (f)
+
+```{r}
+library(FNN)
+
+k_values <- 1:50
+rmse_knn <- numeric(length(k_values))
+
+for (i in seq_along(k_values)) {
+  k <- k_values[i]
+  
+  pred <- knn.reg(train = X_train,
+                  test = X_valid,
+                  y = y_train,
+                  k = k)$pred
+  
+  rmse_knn[i] <- rmse(y_valid, pred)
+}
+
+rmse_knn
+```
+
+Part (g)
+
+```{r}
+plot(k_values, rmse_knn, type = "l", col = "red",
+     xlab = "k", ylab = "RMSE",
+     main = "RMSE vs k")
+```
+
+Part (h)
+
+The optimal value of k is about 4, since this is where the RMSE reaches its minimum point. Choosing this value minimizes prediction error on the validation set.
+
+Part (i)
+
+```{r}
+best_pred <- knn.reg(train = X_train,
+                     test = X_valid,
+                     y = y_train,
+                     k = 4)$pred
+
+(rmse_best_knn <- rmse(y_valid, best_pred))
+```
+
+Part (j)
+
+I would choose the linear regression model, because it has a lower RMSE on the validation set (0.183) compared to the kNN model with k = 4 (0.192). Since we care about generalization to new data, the model with the lower validation error is preferred.

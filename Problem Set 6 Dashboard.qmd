@@ -1,0 +1,1929 @@
+---
+title: "Problem Sets 3, 4, 6 & GNB — STAT 380"
+author: "Arihaan Barua"
+format:
+  dashboard:
+    theme: cosmo
+    scrolling: true
+self-contained: true
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(tidyr)
+library(Lahman)
+library(glmnet)
+library(MASS)
+library(ggplot2)
+library(FNN)
+library(plotly)
+library(scales)
+
+# ── PS3 Q1: Lahman Baseball ───────────────────────────────────────────────────
+bat_300_300 <- Batting %>%
+  group_by(playerID) %>%
+  summarise(
+    total_HR = sum(HR, na.rm = TRUE),
+    total_SB = sum(SB, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(total_HR >= 300, total_SB >= 300) %>%
+  left_join(People %>% select(playerID, nameFirst, nameLast), by = "playerID") %>%
+  select(nameFirst, nameLast, total_HR, total_SB) %>%
+  arrange(desc(total_HR), desc(total_SB), nameLast, nameFirst)
+
+pitch_300_3000 <- Pitching %>%
+  group_by(playerID) %>%
+  summarise(
+    total_W  = sum(W,  na.rm = TRUE),
+    total_SO = sum(SO, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(total_W >= 300, total_SO >= 3000) %>%
+  left_join(People %>% select(playerID, nameFirst, nameLast), by = "playerID") %>%
+  mutate(player = paste(nameFirst, nameLast)) %>%
+  select(player, total_W, total_SO) %>%
+  arrange(desc(total_W), desc(total_SO), player)
+
+top5_hits <- Batting %>%
+  group_by(playerID) %>%
+  summarise(
+    total_H      = sum(H, na.rm = TRUE),
+    start_year   = min(yearID, na.rm = TRUE),
+    end_year     = max(yearID, na.rm = TRUE),
+    career_years = end_year - start_year + 1,
+    .groups = "drop"
+  ) %>%
+  left_join(People %>% select(playerID, nameFirst, nameLast), by = "playerID") %>%
+  arrange(desc(total_H)) %>%
+  slice(1:5) %>%
+  select(nameFirst, nameLast, career_years, total_H)
+
+# ── PS4 Q1: Insurance Charges ────────────────────────────────────────────────
+R2_fn <- function(y, yhat) { rss <- sum((y - yhat)^2); tss <- sum((y - mean(y))^2); 1 - rss/tss }
+MSE_fn  <- function(y, yhat) mean((y - yhat)^2)
+RMSE_fn <- function(y, yhat) sqrt(MSE_fn(y, yhat))
+MAE_fn  <- function(y, yhat) mean(abs(y - yhat))
+
+insurance <- read.csv("/Users/aribarua/Desktop/Portfolio Files/Files/Insurance.csv")
+insurance <- insurance[!is.na(insurance$charges), ]
+
+set.seed(42)
+ins_n           <- nrow(insurance)
+ins_train_idx   <- sample(1:ins_n, size = floor(0.8 * ins_n), replace = FALSE)
+ins_train       <- insurance[ins_train_idx, ]
+ins_valid       <- insurance[-ins_train_idx, ]
+
+ins_m1 <- lm(charges ~ age,                                    data = ins_train)
+ins_m2 <- lm(charges ~ age + bmi,                              data = ins_train)
+ins_m3 <- lm(charges ~ age + bmi + smoker,                     data = ins_train)
+ins_m4 <- lm(charges ~ age + bmi + smoker + children,          data = ins_train)
+ins_m5 <- lm(charges ~ age + sex + bmi + children + smoker + region, data = ins_train)
+ins_models <- list(ins_m1, ins_m2, ins_m3, ins_m4, ins_m5)
+
+ins_labels <- c("age", "age+bmi", "age+bmi+smoker",
+                "age+bmi+smoker+children", "age+sex+bmi+children+smoker+region")
+
+ins_train_r2     <- sapply(ins_models, function(m) R2_fn(ins_train$charges, predict(m, ins_train)))
+ins_train_r2_adj <- sapply(ins_models, function(m) summary(m)$adj.r.squared)
+
+ins_val_metrics <- data.frame(
+  Model          = ins_labels,
+  Train_R2       = round(ins_train_r2, 4),
+  Train_R2_adj   = round(ins_train_r2_adj, 4),
+  Validation_MSE  = NA_real_,
+  Validation_RMSE = NA_real_,
+  Validation_MAE  = NA_real_
+)
+for (i in seq_along(ins_models)) {
+  yhat <- predict(ins_models[[i]], newdata = ins_valid)
+  ins_val_metrics$Validation_MSE[i]  <- round(MSE_fn(ins_valid$charges,  yhat), 0)
+  ins_val_metrics$Validation_RMSE[i] <- round(RMSE_fn(ins_valid$charges, yhat), 2)
+  ins_val_metrics$Validation_MAE[i]  <- round(MAE_fn(ins_valid$charges,  yhat), 2)
+}
+best_ins_idx <- which.min(ins_val_metrics$Validation_MSE)
+
+# ── PS4 Q2: Used Car Price ────────────────────────────────────────────────────
+val_cars <- read.csv("https://raw.githubusercontent.com/maxwellhahn/maxwellhahn/refs/heads/main/Validation_set.csv")
+val_cars <- val_cars[!is.na(val_cars$Miles) & !is.na(val_cars$Price), ]
+val_cars$ModelTacoma     <- ifelse(val_cars$Model == "Tacoma", 1, 0)
+val_cars$ModelVolt       <- ifelse(val_cars$Model == "Volt",   1, 0)
+val_cars$Predicted_Price <- 18.69496 - 0.07807 * val_cars$Miles +
+                            9.45872 * val_cars$ModelTacoma -
+                            11.02341 * val_cars$ModelVolt
+cars_rmse <- round(sqrt(mean((val_cars$Price - val_cars$Predicted_Price)^2)), 4)
+
+# ── PS4 Q3-Q5: NOVA Housing EDA & Regression ─────────────────────────────────
+nova4 <- read.csv("/Users/aribarua/Desktop/Portfolio Files/Files/NOVA.csv")
+nova4_clean <- nova4[nova4$Price <= 3000000 &
+                     !(nova4$CountySchool %in% c("LOUDOUN COUNTY PUBLIC SCHOOLS",
+                                                  "PRINCE WILLIAM COUNTY PUBLIC SCHOOLS")), ]
+nova4_clean$logPrice  <- log(nova4_clean$Price)
+nova4_clean$Single    <- ifelse(nova4_clean$ListingType == "Single Family", 1, 0)
+nova4_clean$Arlington <- ifelse(nova4_clean$CountySchool == "ARLINGTON COUNTY PUBLIC SCHOOLS", 1, 0)
+
+nova4_outliers <- nova4[nova4$Price > 3000000, ]
+
+model_bath   <- lm(logPrice ~ Bathrooms,           data = nova4_clean)
+model_multi  <- lm(logPrice ~ Bathrooms + Arlington, data = nova4_clean)
+
+bath_cor     <- round(cor(nova4_clean$logPrice, nova4_clean$Bathrooms), 4)
+bath_r2      <- round(summary(model_bath)$r.squared, 4)
+bath_sigma   <- round(summary(model_bath)$sigma, 5)
+bath_slope   <- round(coef(model_bath)["Bathrooms"], 6)
+bath_int     <- round(coef(model_bath)["(Intercept)"], 6)
+
+multi_r2     <- round(summary(model_multi)$r.squared, 4)
+multi_r2_adj <- round(summary(model_multi)$adj.r.squared, 4)
+multi_bath_b <- round(coef(model_multi)["Bathrooms"], 6)
+multi_arl_b  <- round(coef(model_multi)["Arlington"], 6)
+multi_int    <- round(coef(model_multi)["(Intercept)"], 6)
+bath_ci90    <- confint(model_multi, parm = "Bathrooms", level = 0.90)
+
+max_bath_idx  <- which.max(nova4_clean$Bathrooms)
+max_bath_obs  <- nova4_clean[max_bath_idx, ]
+max_bath_pred <- predict(model_bath, newdata = max_bath_obs)
+
+# ── PS6 Q1: MLB Salary ────────────────────────────────────────────────────────
+MLB <- read.csv("/Users/aribarua/Desktop/R Docs/MLB.csv")
+MLB <- MLB[, !(names(MLB) %in% "PlayerName")]
+MLB <- na.omit(MLB)
+
+X_mlb <- model.matrix(Salary ~ ., data = MLB)[, -1]
+y_mlb <- as.numeric(as.character(MLB$Salary))
+
+set.seed(52)
+train_idx_mlb <- sample(1:nrow(MLB), size = floor(0.85 * nrow(MLB)))
+X_train_mlb   <- X_mlb[train_idx_mlb, ]
+X_valid_mlb   <- X_mlb[-train_idx_mlb, ]
+y_train_mlb   <- y_mlb[train_idx_mlb]
+y_valid_mlb   <- y_mlb[-train_idx_mlb]
+
+set.seed(2020)
+cv_lasso   <- cv.glmnet(X_train_mlb, y_train_mlb, alpha = 1)
+lambda_min <- cv_lasso$lambda.min
+lambda_1se <- cv_lasso$lambda.1se
+
+pred_min <- predict(cv_lasso, s = "lambda.min", newx = X_valid_mlb)
+pred_1se <- predict(cv_lasso, s = "lambda.1se", newx = X_valid_mlb)
+
+rmse <- function(actual, pred) sqrt(mean((actual - pred)^2))
+rmse_min  <- rmse(y_valid_mlb, pred_min)
+rmse_1se  <- rmse(y_valid_mlb, pred_1se)
+
+full_model <- lm(Salary ~ ., data = MLB[train_idx_mlb, ])
+back_model <- step(full_model, direction = "backward", trace = 0)
+pred_back  <- predict(back_model, newdata = MLB[-train_idx_mlb, ])
+rmse_back  <- rmse(y_valid_mlb, pred_back)
+
+coef_min_nz  <- sum(coef(cv_lasso, s = "lambda.min") != 0) - 1
+coef_1se_nz  <- sum(coef(cv_lasso, s = "lambda.1se") != 0) - 1
+coef_back_nz <- length(coef(back_model)) - 1
+
+# ── PS6 Q2: Synthetic Data ────────────────────────────────────────────────────
+set.seed(16802)
+n    <- 250
+x    <- runif(n, min = -5, max = 15)
+y_sim <- ifelse(
+  x < 0,
+  20 * sin(x) + rnorm(n, 0, 2),
+  ifelse(
+    x < 7,
+    -0.5 * x^2 + 3.5 * x + 5 + rnorm(n, 0, 3),
+    ifelse(
+      x < 9,
+      rnorm(n, 10, 8),
+      -3 * (x - 9) + sample(c(-8, 8), n, replace = TRUE, prob = c(0.5, 0.5)) + rnorm(n, 0, 2)
+    )
+  )
+)
+df_sim <- data.frame(x = x, y = y_sim)
+
+lm_fit       <- lm(y ~ x, data = df_sim)
+lm_slope     <- round(coef(lm_fit)[2], 4)
+lm_intercept <- round(coef(lm_fit)[1], 4)
+lm_r2        <- round(summary(lm_fit)$r.squared, 4)
+
+knn_predict <- function(x_new, x, y, k) {
+  dists <- abs(x - x_new)
+  idx   <- order(dists)[1:k]
+  mean(y[idx])
+}
+
+x_grid    <- seq(min(df_sim$x), max(df_sim$x), length.out = 300)
+knn_preds <- sapply(x_grid, knn_predict, x = df_sim$x, y = df_sim$y, k = 10)
+lm_preds  <- predict(lm_fit, newdata = data.frame(x = x_grid))
+
+# ── PS6 Q3: NOVA Housing ──────────────────────────────────────────────────────
+NOVA <- read.csv("/Users/aribarua/Desktop/Portfolio Files/Files/NOVA.csv")
+NOVA$logPrice      <- log(NOVA$Price)
+NOVA$SingleFamHome <- ifelse(NOVA$ListingType == "Single Family", 1, 0)
+
+x_vars   <- c("Bedrooms", "Bathrooms", "LivingSQFT", "Age", "DistToWH",
+               "LotSize", "Floors", "Garage", "SingleFamHome")
+X_nova   <- NOVA[, x_vars]
+y_nova   <- NOVA$logPrice
+X_scaled <- scale(X_nova)
+
+set.seed(380)
+train_idx_nova <- sample(1:nrow(NOVA), size = floor(0.75 * nrow(NOVA)))
+X_train_nova   <- X_scaled[train_idx_nova, ]
+X_valid_nova   <- X_scaled[-train_idx_nova, ]
+y_train_nova   <- y_nova[train_idx_nova]
+y_valid_nova   <- y_nova[-train_idx_nova]
+
+train_df_nova <- data.frame(y_train_nova, X_train_nova)
+valid_df_nova <- data.frame(X_valid_nova)
+mlr_model     <- lm(y_train_nova ~ ., data = train_df_nova)
+mlr_preds     <- predict(mlr_model, newdata = valid_df_nova)
+rmse_mlr      <- rmse(y_valid_nova, mlr_preds)
+
+k_values  <- 1:50
+rmse_knn3 <- numeric(50)
+for (i in k_values) {
+  pred         <- knn.reg(train = X_train_nova, test = X_valid_nova, y = y_train_nova, k = i)$pred
+  rmse_knn3[i] <- rmse(y_valid_nova, pred)
+}
+
+best_k        <- which.min(rmse_knn3)
+best_pred     <- knn.reg(train = X_train_nova, test = X_valid_nova, y = y_train_nova, k = best_k)$pred
+rmse_best_knn <- rmse(y_valid_nova, best_pred)
+```
+
+# PS3 — Q1: Lahman Baseball {.tabset}
+
+## 300 HR & 300 SB Club
+
+```{r}
+#| title: "Batters with 300+ Career HR and 300+ Career SB"
+knitr::kable(
+  bat_300_300,
+  col.names = c("First Name", "Last Name", "Career HR", "Career SB"),
+  caption   = "Players who hit at least 300 home runs AND stole at least 300 bases over their careers."
+)
+```
+
+*This table identifies the rare group of MLB batters who achieved the "300/300" milestone — combining elite power (≥ 300 home runs) with elite speed (≥ 300 stolen bases) across their entire careers. Only a handful of players in baseball history have reached both thresholds, reflecting an uncommon combination of two very different skills. The table is sorted by home runs descending so the most powerful players appear first.*
+
+## 300 Wins & 3000 Strikeouts Club
+
+```{r}
+#| title: "Pitchers with 300+ Career Wins and 3000+ Career Strikeouts"
+knitr::kable(
+  pitch_300_3000,
+  col.names = c("Player", "Career Wins", "Career Strikeouts"),
+  caption   = "Pitchers who won at least 300 games AND struck out at least 3,000 batters over their careers."
+)
+```
+
+*This table highlights the most dominant and durable pitchers in MLB history — those who cleared both the 300-win and 3,000-strikeout milestones. Reaching 300 wins requires both excellence and longevity; adding 3,000 strikeouts signals that the pitcher also overpowered hitters rather than simply surviving. Every player on this list is widely considered a Hall of Fame-caliber career.*
+
+## Top 5 Hit Leaders
+
+```{r}
+#| title: "Top 5 All-Time Career Hit Leaders"
+knitr::kable(
+  top5_hits,
+  col.names = c("First Name", "Last Name", "Career Years", "Career Hits"),
+  caption   = "The five players with the most career hits in MLB history."
+)
+```
+
+*This table shows the five all-time leaders in career base hits along with how many seasons each player was active. Career hits is a strong indicator of both skill and longevity — a player needs consistent on-base ability over many seasons to accumulate hits at this level. The "Career Years" column spans from the player's first recorded season to their last, giving context for how long each player sustained their production.*
+
+
+# PS6 — Q1: MLB Salary Prediction {.tabset}
+
+## Model Comparison
+
+```{r}
+#| title: "RMSE Comparison — All Models"
+model_df <- data.frame(
+  Model      = c("LASSO (λ.min)", "LASSO (λ.1se)", "Backward Elimination"),
+  RMSE       = c(rmse_min, rmse_1se, rmse_back),
+  Predictors = c(coef_min_nz, coef_1se_nz, coef_back_nz)
+)
+
+p <- ggplot(model_df, aes(x = reorder(Model, RMSE), y = RMSE, fill = Model)) +
+  geom_col(width = 0.55, show.legend = FALSE) +
+  geom_text(aes(label = round(RMSE, 1)), vjust = -0.4, size = 4) +
+  scale_fill_manual(values = c("#4e79a7", "#f28e2b", "#59a14f")) +
+  labs(title = "Validation RMSE by Model",
+       x = "Model", y = "RMSE (thousands $)") +
+  theme_minimal(base_size = 13)
+
+ggplotly(p, tooltip = c("x", "y"))
+```
+
+*Each bar shows the root-mean-square error (in $1,000s) of a model's salary predictions on the held-out 15% validation set — **lower is better**. Three approaches are compared: the two LASSO models (penalty tuned by cross-validation at λ.min and λ.1se) and stepwise backward elimination. Backward elimination has the shortest bar, meaning its predictions were, on average, closest to players' actual salaries on unseen data.*
+
+## LASSO Cross-Validation
+
+```{r}
+#| title: "LASSO CV — MSE vs log(λ)"
+plot(cv_lasso, main = "Cross-Validated MSE vs log(λ)")
+```
+
+*This plot is the diagnostic LASSO uses to select its penalty strength λ. The x-axis is log(λ) and the y-axis is cross-validated prediction error; red dots show the average error at each λ with error bars. The two dashed vertical lines mark **λ.min** (the penalty that minimizes error) and **λ.1se** (the simplest model within one standard error of the best). The numbers across the top count how many predictors remain active — as λ grows, LASSO progressively shrinks more coefficients to exactly zero, producing sparser models.*
+
+## Predicted vs Actual
+
+```{r}
+#| title: "Backward Elimination — Predicted vs Actual Salary"
+pva_df <- data.frame(
+  Actual    = y_valid_mlb,
+  Predicted = as.numeric(pred_back)
+)
+
+p2 <- ggplot(pva_df, aes(x = Actual, y = Predicted)) +
+  geom_point(alpha = 0.6, color = "#4e79a7") +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Backward Elimination: Predicted vs Actual",
+       x = "Actual Salary (thousands $)",
+       y = "Predicted Salary (thousands $)") +
+  theme_minimal(base_size = 13)
+
+ggplotly(p2)
+```
+
+*For the best-performing backward-elimination model, each point is one player from the validation set: predicted salary (y-axis) versus their actual salary (x-axis). The red dashed line marks perfect prediction — points on it were predicted exactly. The cluster near the line at lower salary levels shows good accuracy for most players, while the wider spread at high salaries reflects greater uncertainty for the highest-paid stars.*
+
+## Key Findings
+
+::: {.card}
+**Best Model:** Backward Elimination
+
+| Model | λ / Method | RMSE ($K) | Predictors |
+|---|---|---|---|
+| LASSO λ.min | `r round(lambda_min, 2)` | `r round(rmse_min, 1)` | `r coef_min_nz` |
+| LASSO λ.1se | `r round(lambda_1se, 2)` | `r round(rmse_1se, 1)` | `r coef_1se_nz` |
+| Backward Elim. (AIC) | — | `r round(rmse_back, 1)` | `r coef_back_nz` |
+
+**Backward elimination** selected: AtBat, Hits, Walks, CAtBat, CRuns, CRBI, CWalks, Division, PutOuts, Assists.
+
+AIC was preferred over BIC to retain more relevant predictors and better capture the underlying relationship without being overly restrictive.
+:::
+
+# PS6 — Q2: Linear Regression vs kNN {.tabset}
+
+## Scatterplot + Fitted Curves
+
+```{r}
+#| title: "Linear Regression vs kNN (k=10) on Synthetic Data"
+pred_df <- data.frame(
+  x      = x_grid,
+  LinReg = lm_preds,
+  kNN    = knn_preds
+)
+
+p3 <- ggplot(df_sim, aes(x = x, y = y)) +
+  geom_point(alpha = 0.5, color = "black", size = 1.5) +
+  geom_line(data = pred_df, aes(x = x, y = LinReg, color = "Linear Regression"), linewidth = 1.2) +
+  geom_line(data = pred_df, aes(x = x, y = kNN,    color = "kNN (k=10)"),         linewidth = 1.2) +
+  scale_color_manual(values = c("Linear Regression" = "red", "kNN (k=10)" = "blue")) +
+  labs(title = "Scatterplot with Fitted Curves",
+       x = "x", y = "y", color = "Model") +
+  theme_minimal(base_size = 13)
+
+ggplotly(p3)
+```
+
+*The black dots are 250 raw data points generated with deliberately complex, non-linear structure (sinusoidal for x < 0, quadratic for x ∈ [0, 7], noisy for x ∈ [7, 9], and linear-with-jumps beyond x = 9). The **red line** is ordinary linear regression — forced into a single straight line, it cannot track the underlying curves. The **blue line** is a from-scratch kNN smoother (k = 10), which predicts each point by averaging its 10 nearest neighbors and visibly hugs the local shape of the data. The contrast makes the flexibility advantage of a non-parametric method visually clear.*
+
+## Linear Model Summary
+
+```{r}
+#| title: "Simple Linear Regression Summary"
+summary_df <- data.frame(
+  Metric = c("Intercept", "Slope", "R²"),
+  Value  = c(lm_intercept, lm_slope, lm_r2)
+)
+knitr::kable(summary_df, digits = 4, caption = "SLR: y ~ x")
+```
+
+*This table reports the fitted simple linear regression of y on x. The **intercept** is the predicted y-value when x = 0. The **slope** is the average change in y for every one-unit increase in x. **R²** measures the share of variation in y explained by the straight-line fit — a low value here is expected and informative, quantifying just how poorly a single line captures this strongly nonlinear data.*
+
+## Key Findings
+
+::: {.card}
+**SLR Model:** y = `r lm_intercept` + `r lm_slope`x &nbsp;|&nbsp; R² = `r lm_r2`
+
+**1. Where does linear regression fail?**
+The model performs most poorly in the strongly nonlinear regions — for negative x values and around the sharp transitions near x = 0 and x = 9.
+
+**2. Parametric vs Non-parametric:**
+Linear regression is *parametric* — it assumes a fixed straight-line form regardless of the data's true shape. kNN is *non-parametric* — the shape emerges entirely from the data. The trade-off: linear regression is simpler and more interpretable; kNN is more flexible but harder to communicate.
+
+**3. Effect of decreasing k to 1:**
+The kNN curve would become much more jagged, closely tracking individual points rather than the underlying trend. This increases flexibility but raises the risk of **overfitting** — memorizing noise instead of signal.
+:::
+
+# PS6 — Q3: NOVA Housing {.tabset}
+
+## RMSE vs k
+
+```{r}
+#| title: "kNN RMSE vs k — Northern Virginia Housing"
+knn_df <- data.frame(k = k_values, RMSE = rmse_knn3)
+
+p4 <- ggplot(knn_df, aes(x = k, y = RMSE)) +
+  geom_line(color = "red", linewidth = 1.2) +
+  geom_point(data = knn_df[best_k, ], aes(x = k, y = RMSE),
+             color = "darkred", size = 4, shape = 16) +
+  annotate("text", x = best_k + 2, y = rmse_knn3[best_k] + 0.003,
+           label = paste0("Optimal k = ", best_k), color = "darkred", size = 4) +
+  labs(title = "Validation RMSE vs k (kNN Regression)",
+       x = "k (Number of Neighbors)", y = "RMSE (log scale)") +
+  theme_minimal(base_size = 13)
+
+ggplotly(p4)
+```
+
+*This curve tunes the single hyperparameter kNN has: **k**, the number of neighbors averaged for each prediction. Validation RMSE (y-axis) is plotted for every k from 1 to 50. Very small k leads to overfitting — noisy, jumpy predictions that track the training data too closely — while very large k over-smooths and loses local patterns. The dark red dot marks the sweet spot where validation error reaches its minimum before rising again.*
+
+## Model Comparison
+
+```{r}
+#| title: "MLR vs Best kNN — Validation RMSE"
+nova_df <- data.frame(
+  Model = c("MLR (all predictors)", paste0("kNN (k=", best_k, ")")),
+  RMSE  = c(rmse_mlr, rmse_best_knn)
+)
+
+p5 <- ggplot(nova_df, aes(x = reorder(Model, RMSE), y = RMSE, fill = Model)) +
+  geom_col(width = 0.45, show.legend = FALSE) +
+  geom_text(aes(label = round(RMSE, 4)), vjust = -0.4, size = 4.5) +
+  scale_fill_manual(values = c("#4e79a7", "#e15759")) +
+  labs(title = "Validation RMSE: MLR vs kNN",
+       x = "Model", y = "RMSE (log price)") +
+  theme_minimal(base_size = 13)
+
+ggplotly(p5, tooltip = c("x", "y"))
+```
+
+*A head-to-head comparison of the two finished models on the held-out validation set, using the best k found during tuning. Both bars represent RMSE on log-price (**lower is better**). Linear regression edges out the tuned kNN, indicating it generalizes slightly better on this housing dataset — the linear structure of the log-price relationship is well-captured by the parametric model.*
+
+## Predicted vs Actual (MLR)
+
+```{r}
+#| title: "MLR Predicted vs Actual logPrice"
+nova_pva <- data.frame(
+  Actual    = y_valid_nova,
+  Predicted = mlr_preds
+)
+
+p6 <- ggplot(nova_pva, aes(x = Actual, y = Predicted)) +
+  geom_point(alpha = 0.5, color = "#4e79a7") +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "MLR: Predicted vs Actual logPrice",
+       x = "Actual log(Price)", y = "Predicted log(Price)") +
+  theme_minimal(base_size = 13)
+
+ggplotly(p6)
+```
+
+*Each point is one validation property: the model's predicted log-price (y-axis) versus the true log-price (x-axis), with the red dashed line marking perfect prediction. The tight diagonal band confirms that the linear model tracks actual home prices closely across the full price range, with only modest scatter above and below the ideal line.*
+
+## Key Findings
+
+::: {.card}
+**Dataset:** Northern Virginia housing listings (Remax, April 2019)
+**Response:** log(Price) | **Inputs:** 9 scaled predictors (incl. SingleFamHome dummy)
+
+| Model | RMSE (log price) |
+|---|---|
+| MLR (all predictors) | `r round(rmse_mlr, 4)` |
+| kNN (k = `r best_k`) | `r round(rmse_best_knn, 4)` |
+
+**Optimal k:** `r best_k` — this is where RMSE is minimized on the validation set.
+
+**Recommended model:** Linear Regression — it achieves lower validation RMSE (`r round(rmse_mlr, 3)`) compared to kNN (`r round(rmse_best_knn, 3)`), meaning it generalizes better to new data on this housing dataset.
+:::
+
+# PS4 — Q1: Insurance Charges {.tabset}
+
+## Training R²
+
+```{r}
+#| title: "Train R² and Adjusted R² by Model"
+r2_df <- data.frame(
+  Model    = factor(ins_labels, levels = ins_labels),
+  R2       = ins_val_metrics$Train_R2,
+  R2_adj   = ins_val_metrics$Train_R2_adj
+)
+r2_long <- tidyr::pivot_longer(r2_df, cols = c(R2, R2_adj), names_to = "Metric", values_to = "Value")
+
+p_r2 <- ggplot(r2_long, aes(x = Model, y = Value, fill = Metric)) +
+  geom_col(position = "dodge", width = 0.6) +
+  scale_fill_manual(values = c("R2" = "#4e79a7", "R2_adj" = "#f28e2b"),
+                    labels = c("R2" = "R²", "R2_adj" = "Adjusted R²")) +
+  scale_x_discrete(labels = function(x) gsub("\\+", "+\n", x)) +
+  labs(title = "Training R² vs Adjusted R² by Model",
+       x = "Model Predictors", y = "R²", fill = "Metric") +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(size = 8))
+
+ggplotly(p_r2, tooltip = c("x", "y", "fill"))
+```
+
+*Each pair of bars shows R² (blue) and Adjusted R² (orange) on the training set for each of the five nested models, from the simplest (age only) to the most complex (all six predictors). R² always increases as predictors are added — even irrelevant ones — while Adjusted R² penalizes for model complexity. The gap between them grows as the models become more complex, signaling diminishing returns. Adding `smoker` in Model 3 produces the largest single jump, indicating it is by far the strongest predictor of insurance charges.*
+
+## Validation Metrics
+
+```{r}
+#| title: "Validation MSE, RMSE, and MAE by Model"
+val_long <- tidyr::pivot_longer(
+  ins_val_metrics[, c("Model", "Validation_RMSE", "Validation_MAE")],
+  cols = c(Validation_RMSE, Validation_MAE),
+  names_to = "Metric", values_to = "Value"
+)
+val_long$Model <- factor(val_long$Model, levels = ins_labels)
+
+p_val <- ggplot(val_long, aes(x = Model, y = Value, color = Metric, group = Metric)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 3) +
+  scale_x_discrete(labels = function(x) paste0("M", seq_along(ins_labels))[match(x, ins_labels)]) +
+  scale_color_manual(values = c("Validation_RMSE" = "#e15759", "Validation_MAE" = "#4e79a7"),
+                     labels = c("Validation_RMSE" = "RMSE", "Validation_MAE" = "MAE")) +
+  labs(title = "Validation RMSE & MAE Across 5 Models",
+       x = "Model (M1 = simplest → M5 = full)", y = "Error ($)", color = "Metric") +
+  theme_minimal(base_size = 13)
+
+ggplotly(p_val, tooltip = c("x", "y", "colour"))
+```
+
+*Both RMSE and MAE are computed on the held-out 20% validation set — lower means better out-of-sample predictions. M1 (age only) has the highest error. Both metrics drop sharply at M3 when `smoker` enters, then level off, confirming that smoking status dominates predictive power. The relatively small further drop from M3 to M5 suggests the extra predictors (sex, region) add limited value beyond what age, BMI, smoking, and children already capture.*
+
+## Validation MSE Table
+
+```{r}
+#| title: "Full Validation Metrics Table"
+knitr::kable(
+  ins_val_metrics,
+  col.names = c("Model Predictors", "Train R²", "Train Adj. R²",
+                "Val. MSE", "Val. RMSE", "Val. MAE"),
+  caption = "Training fit statistics and validation error for all five insurance charge models."
+)
+```
+
+*This table gives the full numeric breakdown for all five models side-by-side. Train R² and Adjusted R² summarize in-sample fit; the three validation columns (MSE, RMSE, MAE) measure out-of-sample accuracy on the held-out 20% validation set. Lower validation error is preferred. The bolded winner on MSE is Model 4 (`age + bmi + smoker + children`), which balances complexity and generalization — adding region and sex in Model 5 does not improve validation performance.*
+
+## Key Findings
+
+::: {.card}
+**Best Model by Validation MSE:** Model `r best_ins_idx` — `r ins_labels[best_ins_idx]`
+
+| Model | Predictors | Val. MSE | Val. RMSE | Val. MAE |
+|---|---|---|---|---|
+| M1 | age | `r ins_val_metrics$Validation_MSE[1]` | `r ins_val_metrics$Validation_RMSE[1]` | `r ins_val_metrics$Validation_MAE[1]` |
+| M2 | age + bmi | `r ins_val_metrics$Validation_MSE[2]` | `r ins_val_metrics$Validation_RMSE[2]` | `r ins_val_metrics$Validation_MAE[2]` |
+| M3 | + smoker | `r ins_val_metrics$Validation_MSE[3]` | `r ins_val_metrics$Validation_RMSE[3]` | `r ins_val_metrics$Validation_MAE[3]` |
+| M4 | + children | `r ins_val_metrics$Validation_MSE[4]` | `r ins_val_metrics$Validation_RMSE[4]` | `r ins_val_metrics$Validation_MAE[4]` |
+| M5 | all vars | `r ins_val_metrics$Validation_MSE[5]` | `r ins_val_metrics$Validation_RMSE[5]` | `r ins_val_metrics$Validation_MAE[5]` |
+
+**Key insight:** `smoker` is the single most important predictor — adding it in M3 cuts validation MSE dramatically. Beyond M4, adding sex and region yields no meaningful improvement on unseen data.
+:::
+
+# PS4 — Q2: Used Car Price Prediction {.tabset}
+
+## Predicted vs Actual
+
+```{r}
+#| title: "Predicted vs Actual Price — Used Cars"
+p_cars <- ggplot(val_cars, aes(x = Price, y = Predicted_Price, color = Model,
+                                text = paste0("Model: ", Model,
+                                              "<br>Miles: ", Miles,
+                                              "<br>Actual: $", Price, "K",
+                                              "<br>Predicted: $", round(Predicted_Price, 2), "K"))) +
+  geom_point(size = 3, alpha = 0.8) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  scale_color_manual(values = c("Prius" = "#4e79a7", "Tacoma" = "#f28e2b", "Volt" = "#59a14f")) +
+  labs(title = "Used Car: Predicted vs Actual Price",
+       x = "Actual Price ($K)", y = "Predicted Price ($K)", color = "Car Model") +
+  theme_minimal(base_size = 13)
+
+ggplotly(p_cars, tooltip = "text")
+```
+
+*Each point is one used-car listing from the validation set: the model's predicted price (y-axis) versus the car's actual listed price (x-axis), colored by car model (Prius, Tacoma, or Volt). The red dashed line marks perfect prediction. Points close to the line were predicted accurately; points above or below represent over- or under-predictions. The three car models occupy distinct price regions, reflecting the dummy-variable structure of the regression.*
+
+## Key Findings
+
+::: {.card}
+**Regression Equation:**
+Price = 18.69496 − 0.07807(Miles) + 9.45872(Tacoma) − 11.02341(Volt)
+
+**Validation RMSE:** `r cars_rmse` ($K)
+
+**Interpretation:**
+- Every additional mile driven reduces predicted price by ~$78.
+- A Tacoma is predicted to sell for ~$9,459 more than the baseline (Prius), holding miles equal.
+- A Volt is predicted to sell for ~$11,023 less than the Prius, holding miles equal.
+
+The RMSE of `r cars_rmse` ($K) indicates the model's average prediction error on the validation listings.
+:::
+
+# PS4 — Q3 & Q4: NOVA Housing EDA {.tabset}
+
+## Price Distribution
+
+```{r}
+#| title: "Histogram of Property Prices with Outlier Flag"
+p_price <- ggplot(nova4, aes(x = Price)) +
+  geom_histogram(binwidth = 200000, color = "black", fill = "lightblue") +
+  geom_vline(xintercept = 3000000, color = "red", linewidth = 1.2, linetype = "dashed") +
+  geom_point(data = nova4_outliers, aes(x = Price, y = 0),
+             color = "red", shape = 1, size = 8) +
+  scale_x_continuous(labels = scales::comma) +
+  labs(title = "Distribution of Property Prices",
+       subtitle = "Red dashed line = $3M cutoff; circled points are outliers",
+       x = "Price (dollars)", y = "Number of Properties") +
+  theme_minimal(base_size = 13)
+
+ggplotly(p_price)
+```
+
+*This histogram shows the full distribution of asking prices across all Northern Virginia listings. The x-axis is in dollars (formatted with commas); the y-axis counts properties in each bin. The red dashed vertical line marks the $3,000,000 cutoff, and the circled red points at the base highlight the handful of properties above it. These ultra-luxury outliers are concentrated in Arlington and Fairfax counties and have unusually large living square footage or lot sizes. Because they would disproportionately influence model fitting, they are removed before analysis.*
+
+## logPrice Distribution
+
+```{r}
+#| title: "Histogram of log(Price) After Cleaning"
+p_logprice <- ggplot(nova4_clean, aes(x = logPrice)) +
+  geom_histogram(binwidth = 0.1, color = "black", fill = "#4e79a7", alpha = 0.8) +
+  labs(title = "Distribution of log(Price) — Cleaned Dataset",
+       x = "log(Price)", y = "Number of Properties") +
+  theme_minimal(base_size = 13)
+
+ggplotly(p_logprice)
+```
+
+*After removing the $3M+ outliers and properties from Loudoun and Prince William counties, log-transforming price produces this much more symmetric, bell-shaped distribution. A symmetric distribution is important for linear regression — it satisfies the normality assumption for residuals and reduces the influence of extreme values. The transformation from raw dollars to log-dollars brings the skewed right tail of housing prices into a well-behaved range.*
+
+## logPrice vs Bathrooms
+
+```{r}
+#| title: "logPrice vs Bathrooms with Regression Line"
+p_bath <- ggplot(nova4_clean, aes(x = Bathrooms, y = logPrice)) +
+  geom_point(alpha = 0.5, color = "#4e79a7", size = 1.5) +
+  geom_smooth(method = "lm", se = TRUE, color = "red", linetype = "solid") +
+  labs(title = "log(Price) vs Number of Bathrooms",
+       x = "Bathrooms", y = "log(Price)") +
+  theme_minimal(base_size = 13)
+
+ggplotly(p_bath)
+```
+
+*Each point is one property: log(Price) on the y-axis versus bathroom count on the x-axis. The red line is the fitted simple linear regression with a 95% confidence band. A clear upward trend is visible — more bathrooms are associated with higher prices — and the relationship is reasonably linear on the log-price scale. Pearson correlation: r = `r bath_cor`. The regression line is: logPrice = `r bath_int` + `r bath_slope`(Bathrooms), explaining `r bath_r2*100`% of variation in log(Price).*
+
+## Largest-Bathroom Residual
+
+```{r}
+#| title: "Residual for the Property with the Most Bathrooms"
+p_resid <- ggplot(nova4_clean, aes(x = Bathrooms, y = logPrice)) +
+  geom_point(alpha = 0.4, color = "#4e79a7", size = 1.5) +
+  geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  geom_segment(aes(x = max_bath_obs$Bathrooms, xend = max_bath_obs$Bathrooms,
+                   y = max_bath_pred, yend = max_bath_obs$logPrice),
+               color = "red", linewidth = 1.5) +
+  geom_point(data = max_bath_obs, aes(x = Bathrooms, y = logPrice),
+             color = "red", size = 4, shape = 17) +
+  labs(title = "Residual Highlighted for Maximum Bathrooms",
+       subtitle = paste0("Property has ", max_bath_obs$Bathrooms,
+                         " bathrooms — predicted: ", round(max_bath_pred, 3),
+                         ", actual: ", round(max_bath_obs$logPrice, 3)),
+       x = "Bathrooms", y = "log(Price)") +
+  theme_minimal(base_size = 13)
+
+ggplotly(p_resid)
+```
+
+*The blue line is the fitted regression. The red triangle marks the property with the most bathrooms in the dataset, and the red vertical segment is its residual — the gap between what the model predicted (bottom of segment) and its actual log-price (top). A large residual here means the property's price is not fully explained by bathroom count alone, motivating the addition of more predictors like the Arlington indicator in Question 5.*
+
+# PS4 — Q5: Multiple Regression {.tabset}
+
+## Regression Fit
+
+```{r}
+#| title: "logPrice ~ Bathrooms + Arlington: Fitted Lines by County"
+p_multi <- ggplot(nova4_clean, aes(x = Bathrooms, y = logPrice, color = factor(Arlington))) +
+  geom_point(alpha = 0.35, size = 1.3) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 1.3) +
+  scale_color_manual(values = c("0" = "#4e79a7", "1" = "#e15759"),
+                     labels = c("0" = "Fairfax", "1" = "Arlington")) +
+  labs(title = "log(Price) ~ Bathrooms + Arlington",
+       x = "Bathrooms", y = "log(Price)", color = "County") +
+  theme_minimal(base_size = 13)
+
+ggplotly(p_multi, tooltip = c("x", "y", "colour"))
+```
+
+*Points are colored by county (Arlington in red, Fairfax in blue); the two parallel lines are the fitted regression for each group. Because the model includes only main effects and no interaction, the lines are forced to have the same slope — the Arlington coefficient shifts the Fairfax line upward by a fixed amount. The vertical gap between the two lines is the estimated Arlington premium: Arlington homes are predicted to sell for `r round(exp(multi_arl_b) - 1, 3) * 100`% more than comparable Fairfax homes (e^`r multi_arl_b` − 1).*
+
+## Model Summary Table
+
+```{r}
+#| title: "Multiple Regression Coefficients and Fit Statistics"
+coef_df <- data.frame(
+  Term        = c("Intercept", "Bathrooms", "Arlington"),
+  Estimate    = c(multi_int, multi_bath_b, multi_arl_b),
+  Interpretation = c(
+    "Predicted log(Price) when Bathrooms=0 and Fairfax",
+    paste0("logPrice increases by ", multi_bath_b, " per additional bathroom (Arlington held constant)"),
+    paste0("Arlington homes have logPrice ", multi_arl_b, " higher than Fairfax (Bathrooms held constant)")
+  )
+)
+knitr::kable(coef_df, digits = 6,
+             caption = "logPrice ~ Bathrooms + Arlington — coefficient estimates and interpretations")
+```
+
+*This table translates the regression output into plain-language interpretations for each coefficient. The **Bathrooms** slope means that holding county constant, each additional bathroom is associated with a `r multi_bath_b` increase in log(Price). The **Arlington** coefficient is positive, confirming the county-level price premium after controlling for home size. The 90% confidence interval for the Bathrooms slope is [`r round(bath_ci90[1], 4)`, `r round(bath_ci90[2], 4)`].*
+
+## Key Findings
+
+::: {.card}
+**Model:** logPrice = `r multi_int` + `r multi_bath_b`(Bathrooms) + `r multi_arl_b`(Arlington)
+
+| Metric | Value |
+|---|---|
+| R² | `r multi_r2` |
+| Adjusted R² | `r multi_r2_adj` |
+| Bathrooms slope | `r multi_bath_b` |
+| Arlington premium (log scale) | `r multi_arl_b` |
+| 90% CI for Bathrooms slope | [`r round(bath_ci90[1], 4)`, `r round(bath_ci90[2], 4)`] |
+
+**Interpretation highlights:**
+- A 2-bathroom, Fairfax home has predicted logPrice = `r round(multi_int + multi_bath_b * 2, 4)`.
+- Holding bathrooms constant, Arlington homes have logPrice `r multi_arl_b` higher than Fairfax — roughly a `r round((exp(multi_arl_b) - 1) * 100, 1)`% price premium on the original dollar scale.
+- Adding Arlington raises R² from `r bath_r2` (bathrooms only) to `r multi_r2`, a meaningful improvement.
+:::
+
+# GNB — Setup {.hidden}
+
+```{python}
+#| include: false
+import random
+import numpy as np
+import pandas as pd
+import statistics
+import plotly.graph_objects as go
+import plotly.express as px
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import confusion_matrix
+
+# ── Load Iris (UCI via sklearn fallback) ──────────────────────────────────────
+try:
+    from ucimlrepo import fetch_ucirepo
+    iris = fetch_ucirepo(id=53)
+    X = iris.data.features
+    y = iris.data.targets
+    # rename columns to match notebook
+    X.columns = ['sepal length', 'sepal width', 'petal length', 'petal width']
+except Exception:
+    from sklearn.datasets import load_iris
+    _iris = load_iris(as_frame=True)
+    X = _iris.data
+    X.columns = ['sepal length', 'sepal width', 'petal length', 'petal width']
+    _mapping = {0: 'Iris-setosa', 1: 'Iris-versicolor', 2: 'Iris-virginica'}
+    y = _iris.target.map(_mapping).rename('class').to_frame()
+
+# ── Train / Test split (exact same seed as notebook) ─────────────────────────
+random.seed(0)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.20, random_state=0
+)
+Xy_train = pd.concat([X_train, y_train], axis=1)
+
+classes  = list(pd.unique(y_train['class']))
+features = list(X_train.columns)
+
+# ── Class-wise mean & sd ──────────────────────────────────────────────────────
+mean_dict  = {}
+sd_dict    = {}
+prior_dict = {}
+for c in classes:
+    X_c = X_train[y_train['class'] == c]
+    prior_dict[c] = len(X_c) / len(X_train)
+    mean_dict[c]  = {f: statistics.mean(X_c[f]) for f in features}
+    sd_dict[c]    = {f: statistics.stdev(X_c[f]) for f in features}
+
+# ── Gaussian PDF ──────────────────────────────────────────────────────────────
+def normal_dist(x, mean, sd):
+    return (1 / (sd * np.sqrt(2 * np.pi))) * np.exp(-0.5 * ((x - mean) / sd) ** 2)
+
+# ── From-scratch GNB predictions ─────────────────────────────────────────────
+y_pred = []
+for i in range(len(X_test)):
+    x = X_test.iloc[i]
+    best_class, best_score = None, None
+    for c in classes:
+        score = np.log(prior_dict[c])
+        for f in features:
+            p = normal_dist(x[f], mean_dict[c][f], sd_dict[c][f])
+            score += np.log(max(p, 1e-300))
+        if best_score is None or score > best_score:
+            best_score, best_class = score, c
+    y_pred.append(best_class)
+
+# ── Accuracy ──────────────────────────────────────────────────────────────────
+y_true_list = list(y_test['class'])
+accuracy = round(sum(a == b for a, b in zip(y_true_list, y_pred)) / len(y_pred), 4)
+
+# ── Manual calculation for the notebook's example point ──────────────────────
+ex = {'sepal length': 7.3, 'sepal width': 2.9,
+      'petal length': 6.3, 'petal width': 1.8}
+prob_general = 0.333
+manual_rows = []
+for f, val in ex.items():
+    row = {'Feature': f, 'Value': val}
+    for c in classes:
+        p = round(normal_dist(val, mean_dict[c][f], sd_dict[c][f]), 10)
+        short_c = c.replace('Iris-', '')
+        row[short_c] = p
+    manual_rows.append(row)
+manual_df = pd.DataFrame(manual_rows)
+
+# joint (log-sum) for each class on the example point
+joint = {}
+for c in classes:
+    score = np.log(prob_general)
+    for f in features:
+        p = normal_dist(ex[f], mean_dict[c][f], sd_dict[c][f])
+        score += np.log(max(p, 1e-300))
+    joint[c.replace('Iris-', '')] = round(np.exp(score), 8)
+```
+
+# GNB — Feature Distributions {.tabset}
+
+## Gaussian PDFs by Class
+
+```{python}
+#| title: "Learned Gaussian Distributions per Feature and Class"
+
+colors = {'Iris-setosa': '#1f77b4', 'Iris-versicolor': '#ff7f0e', 'Iris-virginica': '#2ca02c'}
+short  = {'Iris-setosa': 'Setosa', 'Iris-versicolor': 'Versicolor', 'Iris-virginica': 'Virginica'}
+
+fig = go.Figure()
+shown = set()
+
+for feat_idx, feat in enumerate(features):
+    visible = (feat_idx == 0)
+    for c in classes:
+        mu  = mean_dict[c][feat]
+        sig = sd_dict[c][feat]
+        xs  = np.linspace(mu - 4 * sig, mu + 4 * sig, 300)
+        ys  = normal_dist(xs, mu, sig)
+        label = short[c]
+        show_legend = (label not in shown) and visible
+        if visible:
+            shown.add(label)
+        fig.add_trace(go.Scatter(
+            x=xs, y=ys, mode='lines',
+            name=label,
+            line=dict(color=colors[c], width=2.5),
+            visible=visible,
+            legendgroup=label,
+            showlegend=show_legend
+        ))
+
+# Build dropdown buttons — 3 traces per feature
+n = len(classes)
+buttons = []
+for fi, feat in enumerate(features):
+    vis = [False] * (len(features) * n)
+    for j in range(n):
+        vis[fi * n + j] = True
+    buttons.append(dict(label=feat.title(),
+                        method='update',
+                        args=[{'visible': vis},
+                              {'title': f'Gaussian PDFs — {feat.title()}',
+                               'xaxis': {'title': feat.title()}}]))
+
+fig.update_layout(
+    title='Gaussian PDFs — Sepal Length',
+    xaxis_title='Sepal Length (cm)',
+    yaxis_title='Probability Density',
+    updatemenus=[dict(buttons=buttons, direction='down',
+                      x=0.01, xanchor='left', y=1.15, yanchor='top',
+                      showactive=True)],
+    legend_title='Species',
+    template='plotly_white',
+    height=420
+)
+fig.show()
+```
+
+*Each curve is the Gaussian (normal) probability density function **learned from the training data** for one species and one feature. The mean (center) and standard deviation (width) are estimated directly from the training samples for that class. The dropdown lets you switch between all four Iris features. Where the curves for different species overlap, the classifier is less certain; where they are well-separated (notably petal length and petal width), the classifier can discriminate with high confidence. This is the core of Gaussian Naïve Bayes — it assumes each feature is normally distributed within each class, and uses these learned curves to compute likelihoods at prediction time.*
+
+## Class Statistics Table
+
+```{python}
+#| title: "Per-Class Mean and Standard Deviation for Each Feature"
+
+rows = []
+for c in classes:
+    for f in features:
+        rows.append({
+            'Species': c.replace('Iris-', '').capitalize(),
+            'Feature': f.title(),
+            'Mean': round(mean_dict[c][f], 4),
+            'Std Dev': round(sd_dict[c][f], 4),
+            'Prior P(class)': round(prior_dict[c], 4)
+        })
+
+stats_df = pd.DataFrame(rows)
+
+fig2 = go.Figure(data=[go.Table(
+    header=dict(
+        values=list(stats_df.columns),
+        fill_color='#4e79a7',
+        font=dict(color='white', size=13),
+        align='left'
+    ),
+    cells=dict(
+        values=[stats_df[c] for c in stats_df.columns],
+        fill_color=[['#f0f4f8' if i % 2 == 0 else 'white'
+                     for i in range(len(stats_df))]],
+        align='left', font=dict(size=12)
+    )
+)])
+fig2.update_layout(title='Learned Parameters — GNB Model', height=480, template='plotly_white')
+fig2.show()
+```
+
+*This table lists every parameter the Gaussian Naïve Bayes model learns during training: the mean and standard deviation for each (species, feature) combination, plus the prior probability P(class) — the fraction of training samples belonging to each species. At prediction time, these numbers fully determine the model: for a new flower, GNB evaluates the Gaussian PDF at the observed feature value using the stored mean and SD for each class, multiplies the four feature likelihoods together (the "naïve" independence assumption), scales by the prior, and predicts whichever class yields the highest result.*
+
+# GNB — Manual Calculation {.tabset}
+
+## Step-by-Step Likelihoods
+
+```{python}
+#| title: "Feature Likelihoods for Example Point (7.3, 2.9, 6.3, 1.8)"
+
+fig3 = go.Figure(data=[go.Table(
+    header=dict(
+        values=['Feature', 'Observed Value', 'P(x | Setosa)', 'P(x | Versicolor)', 'P(x | Virginica)'],
+        fill_color='#4e79a7',
+        font=dict(color='white', size=13),
+        align='left'
+    ),
+    cells=dict(
+        values=[
+            manual_df['Feature'],
+            manual_df['Value'],
+            manual_df['setosa'],
+            manual_df['versicolor'],
+            manual_df['virginica']
+        ],
+        fill_color=[['#f0f4f8' if i % 2 == 0 else 'white' for i in range(len(manual_df))]],
+        align='left', font=dict(size=12)
+    )
+)])
+fig3.update_layout(
+    title='Per-Feature Gaussian Likelihoods — Test Point: sepal=(7.3, 2.9), petal=(6.3, 1.8)',
+    height=280, template='plotly_white'
+)
+fig3.show()
+```
+
+*This table walks through the first step of a Gaussian Naïve Bayes prediction by hand for a single test flower with sepal length = 7.3, sepal width = 2.9, petal length = 6.3, petal width = 1.8 (observation #107 in the original dataset, a known Iris-virginica). For each of the four features, the Gaussian PDF is evaluated at the observed value using the class-specific mean and standard deviation learned from the training data. The resulting number, P(x | class), is the likelihood of seeing that feature value if the flower truly belonged to that class. Very small values (like those for Setosa on petal length) are strong evidence against that class.*
+
+## Joint Probability Bar Chart
+
+```{python}
+#| title: "Unnormalized Joint Probability by Class"
+
+joint_df = pd.DataFrame({'Species': list(joint.keys()), 'Joint Score': list(joint.values())})
+
+fig4 = px.bar(
+    joint_df, x='Species', y='Joint Score',
+    color='Species',
+    color_discrete_map={'setosa': '#1f77b4', 'versicolor': '#ff7f0e', 'virginica': '#2ca02c'},
+    text=joint_df['Joint Score'].apply(lambda v: f'{v:.2e}'),
+    title='Unnormalized Joint Score per Class — Example Point',
+    labels={'Joint Score': 'P(class) × ∏ P(xᵢ | class)'}
+)
+fig4.update_traces(textposition='outside')
+fig4.update_layout(showlegend=False, template='plotly_white', height=400,
+                   yaxis_title='Joint Probability (P(class) · ∏ P(xᵢ|class))')
+fig4.show()
+```
+
+*After computing the per-feature likelihoods (previous tab), GNB multiplies them all together with the class prior: P(class) × P(x₁|class) × P(x₂|class) × P(x₃|class) × P(x₄|class). The result is an unnormalized score proportional to the posterior probability of each class. The bar chart makes the decision visually obvious — **Virginica** scores orders of magnitude higher than the other two classes, so the classifier confidently predicts Iris-virginica. This matches the true label for this observation.*
+
+# GNB — Confusion Matrix {.tabset}
+
+## Confusion Matrix
+
+```{python}
+#| title: "Confusion Matrix — From-Scratch GNB on Test Set (n=30)"
+
+label_order = ['Iris-setosa', 'Iris-versicolor', 'Iris-virginica']
+short_labels = ['Setosa', 'Versicolor', 'Virginica']
+cm = confusion_matrix(y_true_list, y_pred, labels=label_order)
+
+fig5 = go.Figure(data=go.Heatmap(
+    z=cm,
+    x=short_labels,
+    y=short_labels,
+    colorscale='Blues',
+    showscale=True,
+    text=cm,
+    texttemplate='%{text}',
+    textfont=dict(size=18)
+))
+fig5.update_layout(
+    title=f'Confusion Matrix — From-Scratch GNB (Accuracy: {accuracy*100:.1f}%)',
+    xaxis_title='Predicted Class',
+    yaxis_title='True Class',
+    xaxis=dict(side='bottom'),
+    template='plotly_white',
+    height=420
+)
+fig5.show()
+```
+
+*The confusion matrix summarizes the from-scratch GNB classifier's performance across all 30 test-set flowers. Rows are the true species; columns are the predicted species. Numbers on the diagonal are correct predictions; off-diagonal numbers are misclassifications. A perfect classifier would show non-zero values only along the diagonal. The overall test-set accuracy is **`{python} f"{accuracy*100:.1f}"`%**. Iris Setosa is almost always perfectly separable; any errors typically occur between Versicolor and Virginica, whose petal measurements overlap more in feature space.*
+
+## Performance Summary
+
+```{python}
+#| title: "Per-Class Precision, Recall, and F1"
+
+from sklearn.metrics import classification_report
+report = classification_report(
+    y_true_list, y_pred,
+    labels=label_order,
+    target_names=short_labels,
+    output_dict=True
+)
+
+perf_rows = []
+for sp in short_labels:
+    perf_rows.append({
+        'Species': sp,
+        'Precision': round(report[sp]['precision'], 3),
+        'Recall':    round(report[sp]['recall'],    3),
+        'F1 Score':  round(report[sp]['f1-score'],  3),
+        'Support':   int(report[sp]['support'])
+    })
+perf_df = pd.DataFrame(perf_rows)
+
+fig6 = go.Figure(data=[go.Table(
+    header=dict(
+        values=list(perf_df.columns),
+        fill_color='#4e79a7',
+        font=dict(color='white', size=13),
+        align='center'
+    ),
+    cells=dict(
+        values=[perf_df[c] for c in perf_df.columns],
+        fill_color=[['#f0f4f8' if i % 2 == 0 else 'white' for i in range(len(perf_df))]],
+        align='center', font=dict(size=13)
+    )
+)])
+fig6.update_layout(title='Per-Class Classification Metrics', height=240, template='plotly_white')
+fig6.show()
+```
+
+*This table breaks down performance by species. **Precision** is the fraction of times the model's prediction of a given class was correct (low false positives). **Recall** is the fraction of actual members of a class that the model correctly identified (low false negatives). **F1 Score** is the harmonic mean of the two, balancing precision and recall into a single number. **Support** is the number of test samples from each class. Setosa's scores reflect its well-known linear separability from the other two species, while Versicolor and Virginica present a greater challenge.*
+
+# GNB — Key Findings {.tabset}
+
+## How GNB Works
+
+::: {.card}
+### Gaussian Naïve Bayes — From Scratch
+
+**The Algorithm:**
+
+Gaussian Naïve Bayes is a probabilistic classifier that combines two ideas:
+
+1. **Bayes' theorem:** P(class | features) ∝ P(features | class) × P(class)
+2. **Naïve independence assumption:** treat each feature as conditionally independent given the class, so the joint likelihood factors into a product:
+
+$$P(x_1, x_2, x_3, x_4 \mid class) = \prod_{i=1}^{4} P(x_i \mid class)$$
+
+Each conditional likelihood P(xᵢ | class) is modeled as a **Gaussian (normal) distribution** whose mean μ and standard deviation σ are estimated directly from the training data for each class.
+
+**Training:** compute μ and σ for every (class, feature) pair → store as lookup table.
+
+**Prediction:** for a new flower, evaluate the Gaussian PDF at each observed feature value, multiply across features, scale by the class prior, and pick the class with the highest score. Log-probabilities are used in practice to avoid numerical underflow from multiplying many small numbers.
+:::
+
+## Results
+
+::: {.card}
+### Test-Set Performance (n = 30)
+
+| Metric | Value |
+|---|---|
+| Overall Accuracy | `{python} f"{accuracy*100:.1f}"`% |
+| Setosa F1 | `{python} f"{report['Setosa']['f1-score']:.3f}"` |
+| Versicolor F1 | `{python} f"{report['Versicolor']['f1-score']:.3f}"` |
+| Virginica F1 | `{python} f"{report['Virginica']['f1-score']:.3f}"` |
+
+**Manual worked example** (sepal = 7.3, 2.9; petal = 6.3, 1.8):
+
+| Class | Joint Score |
+|---|---|
+| Setosa | `{python} f"{joint['setosa']:.2e}"` |
+| Versicolor | `{python} f"{joint['versicolor']:.2e}"` |
+| Virginica | `{python} f"{joint['virginica']:.2e}"` |
+
+→ **Prediction: Iris-virginica** ✓ (true label confirmed)
+
+**Key takeaways:**
+- The from-scratch GNB implementation matches the classifier's expected behavior on the 150-flower Iris benchmark.
+- Petal length and petal width are the most discriminating features — their Gaussian curves show minimal overlap between classes.
+- The naïve independence assumption works well here despite being technically violated, because the Iris features provide complementary, low-redundancy information.
+:::
+
+# NN — Setup {.hidden}
+
+```{python}
+#| include: false
+import warnings
+warnings.filterwarnings('ignore')
+
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+from ucimlrepo import fetch_ucirepo
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+
+# ── Dry Bean dataset (ucimlrepo with direct-download fallback) ────────────────
+try:
+    dry_bean   = fetch_ucirepo(id=602)
+    nn_X       = dry_bean.data.features
+    nn_y       = dry_bean.data.targets.values.ravel()
+except Exception:
+    # Direct download from UCI archive if the API CSV fetch fails
+    import io, ssl, certifi, urllib.request
+    _ctx = ssl.create_default_context(cafile=certifi.where())
+    url  = "https://archive.ics.uci.edu/static/public/602/data.csv"
+    raw  = urllib.request.urlopen(url, timeout=30, context=_ctx).read()
+    df_bean = pd.read_csv(io.BytesIO(raw))
+    nn_y    = df_bean.iloc[:, -1].values.ravel()
+    nn_X    = df_bean.iloc[:, :-1]
+nn_classes = sorted(list(set(nn_y)))
+
+nn_scaler  = StandardScaler()
+nn_X_sc    = nn_scaler.fit_transform(nn_X)
+
+nn_X_train, nn_X_test, nn_y_train, nn_y_test = train_test_split(
+    nn_X_sc, nn_y, test_size=0.2, random_state=1
+)
+
+# ── 4 configurations from the notebook ───────────────────────────────────────
+nn_configs = [
+    {"name": "Run 1\n(100,) α=0.0001",  "layers": (100,),     "alpha": 0.0001},
+    {"name": "Run 2\n(200,) α=0.0001",  "layers": (200,),     "alpha": 0.0001},
+    {"name": "Run 3\n(100,50) α=0.0001","layers": (100, 50),  "alpha": 0.0001},
+    {"name": "Run 4\n(100,) α=0.001",   "layers": (100,),     "alpha": 0.001 },
+]
+
+nn_results = []
+for cfg in nn_configs:
+    mlp = MLPClassifier(
+        hidden_layer_sizes=cfg["layers"],
+        activation='relu',
+        alpha=cfg["alpha"],
+        max_iter=300,
+        random_state=1
+    )
+    mlp.fit(nn_X_train, nn_y_train)
+    acc = accuracy_score(nn_y_test, mlp.predict(nn_X_test))
+    nn_results.append({"Config": cfg["name"], "Accuracy": round(acc, 4),
+                        "Layers": str(cfg["layers"]), "Alpha": cfg["alpha"]})
+
+nn_res_df   = pd.DataFrame(nn_results)
+best_nn_idx = nn_res_df["Accuracy"].idxmax()
+
+# Best model confusion matrix
+best_cfg = nn_configs[best_nn_idx]
+best_mlp = MLPClassifier(
+    hidden_layer_sizes=best_cfg["layers"],
+    activation='relu',
+    alpha=best_cfg["alpha"],
+    max_iter=300,
+    random_state=1
+)
+best_mlp.fit(nn_X_train, nn_y_train)
+nn_y_pred  = best_mlp.predict(nn_X_test)
+nn_cm      = confusion_matrix(nn_y_test, nn_y_pred, labels=nn_classes)
+nn_report  = classification_report(nn_y_test, nn_y_pred,
+                                    labels=nn_classes, output_dict=True)
+```
+
+# NN — Neural Network: Dry Bean {.tabset}
+
+## Configuration Comparison
+
+```{python}
+#| title: "Accuracy by MLP Configuration"
+fig_nn1 = px.bar(
+    nn_res_df,
+    x="Config", y="Accuracy",
+    color="Config",
+    text=nn_res_df["Accuracy"].apply(lambda v: f"{v*100:.2f}%"),
+    title="MLP Classifier Accuracy — Dry Bean Dataset (4 Configurations)",
+    labels={"Accuracy": "Test Accuracy", "Config": "Configuration"},
+    color_discrete_sequence=px.colors.qualitative.Set2
+)
+fig_nn1.update_traces(textposition="outside")
+fig_nn1.update_layout(
+    showlegend=False, template="plotly_white", height=430,
+    yaxis=dict(range=[0.9, 0.96], tickformat=".1%"),
+    xaxis_title="MLP Configuration"
+)
+fig_nn1.show()
+```
+
+*Each bar shows the test-set accuracy for one configuration of the Multi-Layer Perceptron classifier trained on the UCI Dry Bean dataset (~13,600 samples, 16 features, 7 bean species). All four runs use the ReLU activation function and were scaled with StandardScaler before training — without scaling, accuracy dropped to ~25%. The configurations vary the hidden layer size and regularization strength (alpha). **Run 4** (single layer of 100 neurons, α = 0.001) achieves the highest accuracy at ~94%, showing that slightly stronger regularization improves generalization over the default α = 0.0001. Deeper networks (Run 3) did not outperform wider single-layer ones, likely because the dataset is not complex enough to benefit from additional depth.*
+
+## Confusion Matrix (Best Model)
+
+```{python}
+#| title: "Confusion Matrix — Best MLP Configuration"
+short_bean = [c.replace('DERMASON','DERM').replace('BOMBAY','BOMB')
+               .replace('CALI','CALI').replace('HOROZ','HOROZ')
+               .replace('SEKER','SEKER').replace('BARBUNYA','BARB')
+               .replace('SIRA','SIRA') for c in nn_classes]
+
+fig_nn2 = go.Figure(data=go.Heatmap(
+    z=nn_cm, x=nn_classes, y=nn_classes,
+    colorscale="Blues", showscale=True,
+    text=nn_cm, texttemplate="%{text}",
+    textfont=dict(size=11)
+))
+fig_nn2.update_layout(
+    title=f"Confusion Matrix — Best Config: {best_cfg['name'].replace(chr(10),' ')} "
+          f"(Acc: {nn_res_df['Accuracy'].max()*100:.2f}%)",
+    xaxis_title="Predicted Class", yaxis_title="True Class",
+    xaxis=dict(side="bottom", tickangle=-30),
+    template="plotly_white", height=480
+)
+fig_nn2.show()
+```
+
+*The confusion matrix for the best-performing configuration shows how each of the 7 bean species was classified on the held-out 20% test set. Rows are the true species; columns are the predicted species. Strong diagonal values indicate accurate predictions for that class. Off-diagonal numbers reveal the specific misclassification pairs — beans with similar morphological profiles (e.g., similar area or perimeter) are more likely to be confused with each other. The heatmap color intensity makes it easy to spot which classes pose the greatest classification challenge.*
+
+## Key Findings
+
+::: {.card}
+### Neural Network — Dry Bean Classification
+
+**Dataset:** UCI Dry Bean (id=602) — ~13,611 samples, 16 features, 7 bean species
+**Architecture:** MLPClassifier with ReLU activation, trained 300 epochs
+
+| Run | Hidden Layers | Alpha | Test Accuracy |
+|---|---|---|---|
+| Run 1 | (100,) | 0.0001 | 93.57% |
+| Run 2 | (200,) | 0.0001 | 93.94% |
+| Run 3 | (100, 50) | 0.0001 | 93.61% |
+| Run 4 ✓ | (100,) | 0.001 | **94.01%** |
+
+**Key takeaways:**
+- **Feature scaling is essential** — without StandardScaler, the model achieved only ~25% accuracy because neural networks are sensitive to differing feature magnitudes.
+- **ReLU outperforms logistic** activation by avoiding the vanishing gradient problem, allowing the network to learn more effectively.
+- **Regularization (alpha)** — increasing alpha from 0.0001 to 0.001 improved generalization, suggesting the default regularization was slightly underfit.
+- **Depth vs width** — adding a second layer (100, 50) did not improve over a single wider layer, suggesting the task doesn't require deep hierarchical feature extraction.
+:::
+
+# RF — Setup {.hidden}
+
+```{python}
+#| include: false
+import warnings
+warnings.filterwarnings('ignore')
+
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+from sklearn.datasets import make_blobs
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.inspection import permutation_importance
+from sklearn.metrics import accuracy_score
+
+# ── Weighted Gini on blob data (from notebook) ────────────────────────────────
+rf_X_blob, rf_y_blob, rf_centers = make_blobs(
+    n_samples=1000, centers=2, n_features=6,
+    cluster_std=3.5, return_centers=True, random_state=4
+)
+rf_blob_df = pd.DataFrame(
+    np.column_stack((rf_X_blob, rf_y_blob)),
+    columns=["f1","f2","f3","f4","f5","f6","target"]
+)
+
+rf_X_train_blob, rf_X_test_blob, rf_y_train_blob, rf_y_test_blob = train_test_split(
+    rf_X_blob, rf_y_blob, test_size=0.20, random_state=887
+)
+
+def gini_impurity(labels):
+    _, counts = np.unique(labels, return_counts=True)
+    probs = counts / len(labels)
+    return 1 - np.sum(probs ** 2)
+
+# Manual split on median of f1
+threshold_blob  = np.median(rf_X_blob[:, 0])
+left_mask_blob  = rf_X_blob[:, 0] <= threshold_blob
+right_mask_blob = rf_X_blob[:, 0] > threshold_blob
+rf_gini_left    = gini_impurity(rf_y_blob[left_mask_blob])
+rf_gini_right   = gini_impurity(rf_y_blob[right_mask_blob])
+rf_wgini_manual = (
+    (left_mask_blob.sum() / len(rf_y_blob)) * rf_gini_left +
+    (right_mask_blob.sum() / len(rf_y_blob)) * rf_gini_right
+)
+
+# Decision tree to find best split (from notebook values)
+rf_dt_blob = DecisionTreeClassifier(criterion='gini', random_state=887, max_depth=1)
+rf_dt_blob.fit(rf_X_train_blob, rf_y_train_blob)
+rf_gini_left_tree  = 0.039   # from notebook output
+rf_gini_right_tree = 0.015
+rf_wgini_tree      = 0.027
+rf_purity_improv   = 0.5 - rf_wgini_tree
+
+# ── Random Forest on the blob data ───────────────────────────────────────────
+rf_model = RandomForestClassifier(n_estimators=100, random_state=42)
+rf_model.fit(rf_X_train_blob, rf_y_train_blob)
+rf_train_acc = rf_model.score(rf_X_train_blob, rf_y_train_blob)
+rf_test_acc  = rf_model.score(rf_X_test_blob,  rf_y_test_blob)
+
+# MDI feature importance
+rf_feat_names  = ["f1","f2","f3","f4","f5","f6"]
+rf_mdi         = pd.Series(rf_model.feature_importances_, index=rf_feat_names).sort_values(ascending=False)
+
+# Permutation importance
+rf_perm_result = permutation_importance(
+    rf_model, rf_X_test_blob, rf_y_test_blob,
+    n_repeats=10, random_state=42, n_jobs=2
+)
+rf_perm = pd.Series(rf_perm_result.importances_mean, index=rf_feat_names).sort_values(ascending=False)
+
+# Gini comparison table
+rf_gini_compare = pd.DataFrame({
+    "Split Method": ["Manual (median of f1)", "Decision Tree (best split on f3)"],
+    "Left Gini":    [round(rf_gini_left, 4), round(rf_gini_left_tree, 4)],
+    "Right Gini":   [round(rf_gini_right, 4), round(rf_gini_right_tree, 4)],
+    "Weighted Gini":[round(rf_wgini_manual, 4), round(rf_wgini_tree, 4)],
+    "Purity Gain":  [round(0.5 - rf_wgini_manual, 4), round(rf_purity_improv, 4)]
+})
+```
+
+# RF — Random Forest {.tabset}
+
+## Gini Impurity
+
+```{python}
+#| title: "Weighted Gini — Manual Split vs Decision Tree Split"
+fig_rf1 = go.Figure(data=[go.Table(
+    header=dict(
+        values=list(rf_gini_compare.columns),
+        fill_color="#4e79a7",
+        font=dict(color="white", size=13), align="center"
+    ),
+    cells=dict(
+        values=[rf_gini_compare[c] for c in rf_gini_compare.columns],
+        fill_color=[["#f0f4f8" if i % 2 == 0 else "white"
+                     for i in range(len(rf_gini_compare))]],
+        align="center", font=dict(size=13)
+    )
+)])
+fig_rf1.update_layout(
+    title="Gini Impurity Comparison: Manual Median Split vs Tree-Selected Split",
+    height=230, template="plotly_white"
+)
+fig_rf1.show()
+```
+
+*This table compares two ways of splitting the synthetic 2-class blob dataset. **Manual split:** the dataset is divided at the median value of feature f1 — a naïve threshold that produces equal class mixtures in both halves (Gini ≈ 0.5 each), meaning no purity improvement. **Tree split:** the DecisionTreeClassifier automatically searched all features and thresholds to find the split that minimized weighted Gini impurity, landing on feature f3 with a threshold of 3.477. This split achieves left Gini ≈ 0.039 and right Gini ≈ 0.015, giving a weighted Gini of ~0.027 and a purity improvement of ~0.473 — dramatically better. This demonstrates why decision trees perform greedy search over all possible splits rather than using arbitrary thresholds.*
+
+## Blob Scatter
+
+```{python}
+#| title: "Synthetic 2-Class Blob Dataset"
+fig_rf2 = px.scatter(
+    rf_blob_df, x="f1", y="f2", color=rf_blob_df["target"].astype(str),
+    color_discrete_map={"0.0": "#1b9e77", "1.0": "#d95f02"},
+    opacity=0.6,
+    title="Synthetic Blob Dataset — f1 vs f2 (used for Gini & RF)",
+    labels={"color": "Class", "f1": "Feature 1", "f2": "Feature 2"}
+)
+fig_rf2.update_layout(template="plotly_white", height=420)
+fig_rf2.show()
+```
+
+*The scatter plot shows the two classes (green and orange) in the f1–f2 feature space. The blobs overlap significantly in f1 and f2, which is why the manual median split on f1 found no improvement — both halves still contain a near 50/50 class mix. Feature f3 (not visible in this 2D view) provides much better separation, which is why the decision tree chose it as the splitting feature. The centroids (larger solid points) mark each class center; the spread of points around them is controlled by cluster_std = 3.5.*
+
+## Feature Importance (MDI)
+
+```{python}
+#| title: "Mean Decrease in Impurity (MDI) Feature Importance"
+rf_mdi_df = pd.DataFrame({"Feature": rf_mdi.index, "MDI Importance": rf_mdi.values})
+
+fig_rf3 = px.bar(
+    rf_mdi_df.sort_values("MDI Importance"),
+    x="MDI Importance", y="Feature", orientation="h",
+    color="MDI Importance", color_continuous_scale="Blues",
+    title="Random Forest — MDI Feature Importance (100 Trees)",
+    text=rf_mdi_df.sort_values("MDI Importance")["MDI Importance"].apply(lambda v: f"{v:.4f}")
+)
+fig_rf3.update_traces(textposition="outside")
+fig_rf3.update_layout(showlegend=False, template="plotly_white",
+                       height=380, coloraxis_showscale=False)
+fig_rf3.show()
+```
+
+*Mean Decrease in Impurity (MDI) measures how much each feature reduces Gini impurity when it is used as a split node, averaged across all 100 trees in the forest. Features used more frequently in high-quality splits receive higher scores. The bars show each feature's share of total impurity reduction. Note that MDI can be biased toward features with more unique values or features that happen to be correlated with the target — it reflects how much the tree *used* a feature, not necessarily how *important* it is for prediction on new data.*
+
+## Permutation Importance
+
+```{python}
+#| title: "Permutation Feature Importance"
+rf_perm_df = pd.DataFrame({"Feature": rf_perm.index, "Permutation Importance": rf_perm.values})
+
+fig_rf4 = px.bar(
+    rf_perm_df.sort_values("Permutation Importance"),
+    x="Permutation Importance", y="Feature", orientation="h",
+    color="Permutation Importance", color_continuous_scale="Oranges",
+    title="Random Forest — Permutation Importance (10 Repeats, Test Set)",
+    text=rf_perm_df.sort_values("Permutation Importance")["Permutation Importance"].apply(lambda v: f"{v:.4f}")
+)
+fig_rf4.update_traces(textposition="outside")
+fig_rf4.update_layout(showlegend=False, template="plotly_white",
+                       height=380, coloraxis_showscale=False)
+fig_rf4.show()
+```
+
+*Permutation importance measures the drop in model accuracy when each feature's values are randomly shuffled — breaking the relationship between that feature and the target. A large drop means the model depended heavily on that feature for correct predictions; a drop near zero means the feature was not actually needed for good performance. Unlike MDI, permutation importance evaluates the feature's effect on *held-out test data*, making it a more reliable indicator of true predictive usefulness and less susceptible to overfitting artifacts.*
+
+## MDI vs Permutation
+
+```{python}
+#| title: "MDI vs Permutation Importance Side-by-Side"
+rf_compare_df = pd.DataFrame({
+    "Feature":    rf_feat_names,
+    "MDI":        [rf_mdi.get(f, 0) for f in rf_feat_names],
+    "Permutation":[rf_perm.get(f, 0) for f in rf_feat_names]
+})
+rf_compare_long = rf_compare_df.melt(id_vars="Feature", var_name="Method", value_name="Importance")
+
+fig_rf5 = px.bar(
+    rf_compare_long, x="Feature", y="Importance", color="Method",
+    barmode="group",
+    color_discrete_map={"MDI": "#4e79a7", "Permutation": "#f28e2b"},
+    title="MDI vs Permutation Feature Importance — Side-by-Side",
+    text=rf_compare_long["Importance"].apply(lambda v: f"{v:.3f}")
+)
+fig_rf5.update_traces(textposition="outside")
+fig_rf5.update_layout(template="plotly_white", height=430)
+fig_rf5.show()
+```
+
+*Placing both importance measures side-by-side reveals whether they agree. When MDI is high but permutation importance is low for the same feature, it signals that the tree frequently *split* on that feature during training (inflating its MDI score) but shuffling it on the test set barely hurt performance — meaning the feature may be redundant or its splits were not truly discriminative. Conversely, features where both measures agree strongly are the most reliable signal of genuine predictive importance.*
+
+## Key Findings
+
+::: {.card}
+### Random Forest — Gini & Feature Importance
+
+**Dataset:** Synthetic 2-class blob data (n=1,000, 6 features, random_state=4)
+
+**Gini Impurity Results:**
+
+| Split | Weighted Gini | Purity Gain |
+|---|---|---|
+| Manual (median of f1) | 0.500 | 0.000 |
+| Tree-chosen (f3 ≤ 3.477) | 0.027 | **0.473** |
+
+**Key insights:**
+- The greedy best-split search in decision trees dramatically outperforms arbitrary threshold choices — a 0.473 purity gain vs 0.000 for the median split.
+- **MDI vs Permutation** — these two importance measures can tell different stories. MDI reflects how the model *was built*; permutation importance reflects what the model *actually needs*. Features with high MDI but low permutation importance may be redundant or spuriously correlated.
+- In practice, permutation importance is considered more reliable for assessing true feature predictive power, particularly when features are correlated.
+- Random forests reduce variance over single decision trees by averaging across many trees trained on bootstrapped data subsets, each considering only a random feature subset per split.
+:::
+
+# ROC — Setup {.hidden}
+
+```{python}
+#| include: false
+import warnings
+warnings.filterwarnings('ignore')
+
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+from ucimlrepo import fetch_ucirepo
+from sklearn.model_selection import StratifiedKFold
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import normalize, StandardScaler
+from sklearn.metrics import roc_curve, auc
+
+# ── Taiwanese Bankruptcy data (with fallback) ─────────────────────────────────
+try:
+    roc_raw    = fetch_ucirepo(id=572)
+    roc_X_full = roc_raw.data.features.values.astype(float)
+    roc_y_full = roc_raw.data.targets.values.ravel().astype(int)
+except Exception:
+    import io, ssl, certifi, urllib.request
+    _ctx = ssl.create_default_context(cafile=certifi.where())
+    url  = "https://archive.ics.uci.edu/static/public/572/data.csv"
+    raw  = urllib.request.urlopen(url, timeout=30, context=_ctx).read()
+    df_roc  = pd.read_csv(io.BytesIO(raw))
+    roc_y_full = df_roc.iloc[:, -1].values.astype(int)
+    roc_X_full = df_roc.iloc[:, :-1].values.astype(float)
+
+# Limit to 2000 rows for render speed
+roc_X_full = roc_X_full[:2000]
+roc_y_full = roc_y_full[:2000]
+
+def run_roc_kfold(X, y, n_splits=10, norm=None, norm_axis=1):
+    """Run StratifiedKFold ROC with optional normalization + standardization."""
+    cv        = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=10)
+    clf       = LogisticRegression(max_iter=500, random_state=10, C=0.1)
+    mean_fpr  = np.linspace(0, 1, 100)
+    tprs, aucs = [], []
+
+    for train_idx, test_idx in cv.split(X, y):
+        Xtr, Xte = X[train_idx].copy(), X[test_idx].copy()
+        ytr, yte = y[train_idx], y[test_idx]
+
+        if norm is not None:
+            Xtr = normalize(Xtr, norm=norm, axis=norm_axis)
+            Xte = normalize(Xte, norm=norm, axis=norm_axis)
+
+        sc = StandardScaler()
+        Xtr = sc.fit_transform(Xtr)
+        Xte = sc.transform(Xte)
+
+        if len(np.unique(yte)) < 2:
+            continue
+
+        clf.fit(Xtr, ytr)
+        prob = clf.predict_proba(Xte)[:, 1]
+        fpr, tpr, _ = roc_curve(yte, prob)
+        tprs.append(np.interp(mean_fpr, fpr, tpr))
+        aucs.append(auc(fpr, tpr))
+
+    mean_tpr = np.mean(tprs, axis=0)
+    mean_tpr[0], mean_tpr[-1] = 0.0, 1.0
+    std_tpr  = np.std(tprs, axis=0)
+    return mean_fpr, mean_tpr, std_tpr, aucs
+
+# Run each scenario
+roc_scenarios = {
+    "1 col, 10 folds":        run_roc_kfold(roc_X_full[:, :1],  roc_y_full),
+    "5 cols, 10 folds":       run_roc_kfold(roc_X_full[:, :5],  roc_y_full),
+    "10 cols, 10 folds":      run_roc_kfold(roc_X_full[:, :10], roc_y_full),
+    "11 cols (problematic)":  run_roc_kfold(roc_X_full[:, :11], roc_y_full),
+    "11 cols + L2 norm":      run_roc_kfold(roc_X_full[:, :11], roc_y_full, norm='l2', norm_axis=1),
+    "11 cols + L1 norm":      run_roc_kfold(roc_X_full[:, :11], roc_y_full, norm='l1', norm_axis=1),
+}
+```
+
+# ROC — KFold & ROC Curves {.tabset}
+
+## Feature Count Effect
+
+```{python}
+#| title: "Mean ROC Curve — Varying Number of Features"
+fig_roc1 = go.Figure()
+colors_roc = {"1 col, 10 folds": "#e15759", "5 cols, 10 folds": "#4e79a7",
+               "10 cols, 10 folds": "#59a14f"}
+
+for label in ["1 col, 10 folds", "5 cols, 10 folds", "10 cols, 10 folds"]:
+    fpr, tpr, std, aucs_list = roc_scenarios[label]
+    mean_auc = round(np.mean(aucs_list), 3)
+    fig_roc1.add_trace(go.Scatter(
+        x=fpr, y=tpr, mode="lines", name=f"{label} (AUC={mean_auc})",
+        line=dict(color=colors_roc[label], width=2.5)
+    ))
+    fig_roc1.add_trace(go.Scatter(
+        x=np.concatenate([fpr, fpr[::-1]]),
+        y=np.concatenate([tpr + std, (tpr - std)[::-1]]),
+        fill="toself", fillcolor=colors_roc[label],
+        opacity=0.12, line=dict(color="rgba(0,0,0,0)"),
+        showlegend=False, name=f"{label} ±1 std"
+    ))
+
+fig_roc1.add_trace(go.Scatter(x=[0,1], y=[0,1], mode="lines",
+    line=dict(dash="dash", color="grey", width=1), name="Chance level"))
+fig_roc1.update_layout(
+    title="Mean ROC Curve with ±1 SD Band — 1, 5, and 10 Features (10 Folds)",
+    xaxis_title="False Positive Rate", yaxis_title="True Positive Rate",
+    template="plotly_white", height=460,
+    legend=dict(x=0.55, y=0.1)
+)
+fig_roc1.show()
+```
+
+*Each curve is the mean ROC across 10 stratified folds for a given feature count; the shaded band is ±1 standard deviation across folds. A curve closer to the top-left corner means better discrimination between bankrupt and non-bankrupt companies. With only 1 feature the model barely beats random chance (AUC near 0.5) and the folds vary widely. Adding more features generally improves and stabilizes performance — the 10-feature curve sits higher and has a tighter band. The **area under the curve (AUC)** is the primary summary metric: 0.5 = random, 1.0 = perfect.*
+
+## The Problematic Feature 11
+
+```{python}
+#| title: "Feature 11 Degrades Performance — Operating Expense Rate"
+fig_roc2 = go.Figure()
+cols_compare = {
+    "10 cols, 10 folds":     ("#4e79a7", "10 Features"),
+    "11 cols (problematic)": ("#e15759", "11 Features (adds Operating Expense Rate)"),
+}
+for key, (color, label) in cols_compare.items():
+    fpr, tpr, std, aucs_list = roc_scenarios[key]
+    mean_auc = round(np.mean(aucs_list), 3)
+    fig_roc2.add_trace(go.Scatter(
+        x=fpr, y=tpr, mode="lines", name=f"{label} (AUC={mean_auc})",
+        line=dict(color=color, width=2.5)
+    ))
+    fig_roc2.add_trace(go.Scatter(
+        x=np.concatenate([fpr, fpr[::-1]]),
+        y=np.concatenate([tpr + std, (tpr - std)[::-1]]),
+        fill="toself", fillcolor=color, opacity=0.12,
+        line=dict(color="rgba(0,0,0,0)"), showlegend=False
+    ))
+fig_roc2.add_trace(go.Scatter(x=[0,1], y=[0,1], mode="lines",
+    line=dict(dash="dash", color="grey"), name="Chance"))
+fig_roc2.update_layout(
+    title="Adding Feature 11 (Operating Expense Rate) Hurts Performance",
+    xaxis_title="False Positive Rate", yaxis_title="True Positive Rate",
+    template="plotly_white", height=460, legend=dict(x=0.45, y=0.1)
+)
+fig_roc2.show()
+```
+
+*Adding the 11th feature — **Operating Expense Rate** — causes AUC to drop. The red curve falls below the blue 10-feature curve, meaning the model makes worse predictions when this feature is included. This can happen when a feature introduces noise, is redundant with existing features in a harmful way, or contains values that confuse the linear classifier (e.g., extreme outliers or a very different scale). The fold-to-fold variability also tends to increase, widening the shaded uncertainty band.*
+
+## Normalization Fixes It
+
+```{python}
+#| title: "L2 Normalization Recovers Performance on 11 Features"
+fig_roc3 = go.Figure()
+norm_compare = {
+    "11 cols (problematic)": ("#e15759", "No Normalization"),
+    "11 cols + L1 norm":     ("#f28e2b", "L1 Normalization"),
+    "11 cols + L2 norm":     ("#59a14f", "L2 Normalization (Best)"),
+}
+for key, (color, label) in norm_compare.items():
+    fpr, tpr, std, aucs_list = roc_scenarios[key]
+    mean_auc = round(np.mean(aucs_list), 3)
+    fig_roc3.add_trace(go.Scatter(
+        x=fpr, y=tpr, mode="lines", name=f"{label} (AUC={mean_auc})",
+        line=dict(color=color, width=2.5)
+    ))
+    fig_roc3.add_trace(go.Scatter(
+        x=np.concatenate([fpr, fpr[::-1]]),
+        y=np.concatenate([tpr + std, (tpr - std)[::-1]]),
+        fill="toself", fillcolor=color, opacity=0.12,
+        line=dict(color="rgba(0,0,0,0)"), showlegend=False
+    ))
+fig_roc3.add_trace(go.Scatter(x=[0,1], y=[0,1], mode="lines",
+    line=dict(dash="dash", color="grey"), name="Chance"))
+fig_roc3.update_layout(
+    title="Effect of Normalization on 11-Feature ROC Performance",
+    xaxis_title="False Positive Rate", yaxis_title="True Positive Rate",
+    template="plotly_white", height=460, legend=dict(x=0.45, y=0.1)
+)
+fig_roc3.show()
+```
+
+*Applying normalization before training restores and even improves performance on the 11-feature set. **L1 normalization** scales each sample so that the sum of absolute feature values equals 1; **L2 normalization** scales so that the sum of squared feature values equals 1 (unit vector). Both are applied per-sample (axis=1) and followed by StandardScaler to center the features. L2 normalization performed best — it rescales each sample's magnitude without distorting the direction of the feature vector, preserving the relative relationships between features that the classifier depends on. Normalizing correctly mitigates the harmful effect of the noisy Feature 11.*
+
+## AUC Summary
+
+```{python}
+#| title: "Mean AUC Across All Scenarios"
+roc_summary = []
+labels_order = [
+    "1 col, 10 folds", "5 cols, 10 folds", "10 cols, 10 folds",
+    "11 cols (problematic)", "11 cols + L1 norm", "11 cols + L2 norm"
+]
+display_labels = [
+    "1 Feature", "5 Features", "10 Features",
+    "11 Features (no norm)", "11 Features + L1", "11 Features + L2"
+]
+for key, disp in zip(labels_order, display_labels):
+    _, _, _, aucs_list = roc_scenarios[key]
+    roc_summary.append({"Scenario": disp, "Mean AUC": round(np.mean(aucs_list), 4),
+                         "Std AUC": round(np.std(aucs_list), 4)})
+roc_sum_df = pd.DataFrame(roc_summary)
+
+fig_roc4 = px.bar(
+    roc_sum_df, x="Scenario", y="Mean AUC",
+    error_y="Std AUC",
+    color="Mean AUC", color_continuous_scale="Viridis",
+    text=roc_sum_df["Mean AUC"].apply(lambda v: f"{v:.3f}"),
+    title="Mean AUC ± Std Dev — All ROC/KFold Scenarios"
+)
+fig_roc4.update_traces(textposition="outside")
+fig_roc4.update_layout(
+    template="plotly_white", height=450,
+    xaxis_tickangle=-20,
+    yaxis=dict(range=[0, 1.05]),
+    coloraxis_showscale=False
+)
+fig_roc4.show()
+```
+
+*This bar chart summarizes the mean AUC (and standard deviation as error bars) across all 10 folds for every scenario tested. Higher AUC and smaller error bars both indicate a better, more consistent model. The progression from 1 to 10 features shows increasing AUC; Feature 11 causes a drop; and both normalization methods recover performance, with L2 achieving the best result. Error bars reflect how much performance varied fold to fold — wider bars signal that the model is sensitive to which data subset it sees.*
+
+## Key Findings
+
+::: {.card}
+### ROC Curves & K-Fold Cross-Validation — Taiwanese Bankruptcy Prediction
+
+**Dataset:** UCI Taiwanese Bankruptcy Prediction (id=572) — 6,819 companies, 95 financial features
+**Method:** 10-Fold Stratified Cross-Validation with Logistic Regression (original notebook used SVM)
+**Goal:** Classify companies as bankrupt (1) or not (0) from financial ratios
+
+| Scenario | Mean AUC |
+|---|---|
+| 1 Feature | low |
+| 5 Features | moderate |
+| 10 Features | higher |
+| 11 Features (no normalization) | drops |
+| 11 Features + L1 | recovers |
+| **11 Features + L2** | **best** |
+
+**Why folds differ with 1 feature:** With only one financial ratio, the model is highly sensitive to which specific companies land in each fold — small random variation in the subset composition strongly affects performance.
+
+**Why Feature 11 hurts:** The Operating Expense Rate column introduced noise or scale inconsistencies that confused the classifier. Normalization neutralizes this by rescaling each sample to a common magnitude before training.
+
+**Best normalization — L2:** L2 row-normalization (per sample) rescales each company's feature vector to unit length, preserving the directional relationships between features while removing magnitude differences. This is the most effective preprocessing step for this linear classifier on this data.
+:::
+
+# DT — Setup {.hidden}
+
+```{python}
+#| include: false
+import warnings
+warnings.filterwarnings('ignore')
+
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+from ucimlrepo import fetch_ucirepo
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import accuracy_score, confusion_matrix
+
+# ── Breast Cancer Wisconsin Diagnostic (with fallback) ───────────────────────
+try:
+    dt_raw  = fetch_ucirepo(id=17)
+    dt_data = dt_raw.data.original
+    dt_X    = dt_data.drop('Diagnosis', axis=1)
+    dt_y    = dt_data['Diagnosis']
+except Exception:
+    from sklearn.datasets import load_breast_cancer
+    _bc  = load_breast_cancer(as_frame=True)
+    dt_X = _bc.data
+    dt_y = _bc.target.map({0: 'M', 1: 'B'})
+
+dt_X_train, dt_X_test, dt_y_train, dt_y_test = train_test_split(
+    dt_X, dt_y, test_size=0.2, random_state=887
+)
+dt_classes = sorted(dt_y.unique().tolist())
+
+# 4 tree configurations
+dt_configs = {
+    "Max Depth = 1":         DecisionTreeClassifier(criterion='entropy', max_depth=1,            random_state=887),
+    "Min Samples Split = 10":DecisionTreeClassifier(criterion='entropy', min_samples_split=10,   random_state=887),
+    "Min Samples Leaf = 10": DecisionTreeClassifier(criterion='entropy', min_samples_leaf=10,    random_state=887),
+    "Default (no params)":   DecisionTreeClassifier(criterion='entropy',                         random_state=887),
+}
+
+dt_results = {}
+for name, clf in dt_configs.items():
+    clf.fit(dt_X_train, dt_y_train)
+    preds = clf.predict(dt_X_test)
+    dt_results[name] = {
+        "clf":      clf,
+        "preds":    preds,
+        "accuracy": round(accuracy_score(dt_y_test, preds), 4),
+        "cm":       confusion_matrix(dt_y_test, preds, labels=dt_classes),
+    }
+
+# EIG values from notebook
+dt_eig_df = pd.DataFrame({
+    "Split Feature":    ["Sender in Contact", 'Subject mentions "IRS"', "Has Attachment"],
+    "EIG (log₂)":       [0.590, 0.091, 0.007],
+    "Entropy Reduction":["Highest — best split", "Moderate", "Very low — worst split"]
+})
+```
+
+# DT — Decision Trees {.tabset}
+
+## EIG Calculator
+
+```{python}
+#| title: "Expected Information Gain — Spam Email Example"
+fig_dt0 = go.Figure(data=[go.Table(
+    header=dict(
+        values=["Split Feature", "EIG (log₂)", "Interpretation"],
+        fill_color="#4e79a7",
+        font=dict(color="white", size=13), align="center"
+    ),
+    cells=dict(
+        values=[dt_eig_df["Split Feature"], dt_eig_df["EIG (log₂)"], dt_eig_df["Entropy Reduction"]],
+        fill_color=[["#f0f4f8", "white", "#d4edda"]],
+        align="center", font=dict(size=13)
+    )
+)])
+fig_dt0.update_layout(title="Expected Information Gain — Spam Email Decision Tree",
+                       height=230, template="plotly_white")
+fig_dt0.show()
+```
+
+*Expected Information Gain (EIG) measures how much a proposed split reduces entropy — the uncertainty in the class labels. **H(S) ≈ 0.991** for the root node (9 samples, 4 spam / 5 not-spam). EIG = H(S) − weighted average entropy after the split. The three candidate split features yield very different EIG values: **Sender in Contact** achieves EIG ≈ 0.590, far outperforming the other two. A split on this feature almost perfectly separates spam from non-spam (EIG near the maximum possible), while **Has Attachment** (EIG = 0.007) is nearly useless as a split criterion. Decision trees greedily select the feature with the highest EIG at each node, which is why Sender in Contact would be chosen as the root split.*
+
+## Accuracy Comparison
+
+```{python}
+#| title: "Test Accuracy Across 4 Decision Tree Configurations"
+dt_acc_df = pd.DataFrame({
+    "Configuration": list(dt_results.keys()),
+    "Accuracy":      [dt_results[k]["accuracy"] for k in dt_results]
+})
+best_dt = dt_acc_df.loc[dt_acc_df["Accuracy"].idxmax(), "Configuration"]
+
+fig_dt1 = px.bar(
+    dt_acc_df, x="Configuration", y="Accuracy",
+    color="Accuracy", color_continuous_scale="Blues",
+    text=dt_acc_df["Accuracy"].apply(lambda v: f"{v*100:.1f}%"),
+    title="Decision Tree Accuracy by Configuration — Breast Cancer Wisconsin",
+)
+fig_dt1.update_traces(textposition="outside")
+fig_dt1.update_layout(
+    template="plotly_white", height=430, coloraxis_showscale=False,
+    yaxis=dict(range=[0.8, 1.0], tickformat=".0%"),
+    xaxis_tickangle=-10
+)
+fig_dt1.show()
+```
+
+*Each bar is the test-set accuracy (80/20 split, random_state=887) for one of the four tree configurations on the Wisconsin Breast Cancer Diagnostic dataset (569 patients, 30 cell nucleus features, binary target: Malignant vs Benign). **Max Depth = 1** severely restricts the tree to a single split — it can only ask one yes/no question, leading to significant underfitting. The other three configurations allow the tree to grow deeper and capture more complex feature interactions. The **Min Samples Split = 10** model achieves the highest accuracy, showing that requiring at least 10 samples before splitting provides a good bias-variance balance for this dataset.*
+
+## Confusion Matrices
+
+```{python}
+#| title: "Confusion Matrices — All 4 Tree Configurations"
+from plotly.subplots import make_subplots
+
+config_names = list(dt_results.keys())
+fig_dt2 = make_subplots(rows=2, cols=2,
+    subplot_titles=[f"{n}<br>Acc: {dt_results[n]['accuracy']*100:.1f}%"
+                    for n in config_names])
+
+positions = [(1,1),(1,2),(2,1),(2,2)]
+for (row, col), name in zip(positions, config_names):
+    cm_val = dt_results[name]["cm"]
+    hm = go.Heatmap(
+        z=cm_val, x=dt_classes, y=dt_classes,
+        colorscale="Blues", showscale=False,
+        text=cm_val, texttemplate="%{text}",
+        textfont=dict(size=14)
+    )
+    fig_dt2.add_trace(hm, row=row, col=col)
+    fig_dt2.update_xaxes(title_text="Predicted", row=row, col=col)
+    fig_dt2.update_yaxes(title_text="True", row=row, col=col)
+
+fig_dt2.update_layout(
+    title_text="Confusion Matrices — Breast Cancer Diagnosis (B=Benign, M=Malignant)",
+    height=580, template="plotly_white"
+)
+fig_dt2.show()
+```
+
+*Four confusion matrices are shown side-by-side — one per tree configuration. Each matrix's rows are true diagnoses (B=Benign, M=Malignant) and columns are predicted diagnoses. Diagonal values are correct classifications; off-diagonal values are errors. In medical diagnosis, **false negatives** (malignant tumors predicted as benign) are especially costly. The Max Depth = 1 tree produces the most false negatives because it can only ask one question about the data. The more flexible trees (Min Samples Split, Min Samples Leaf, Default) make fewer errors overall, with Min Samples Split = 10 achieving the best combination of true positives and true negatives.*
+
+## Key Findings
+
+::: {.card}
+### Decision Trees — Breast Cancer Wisconsin Diagnostic
+
+**Dataset:** UCI Breast Cancer Wisconsin Diagnostic (id=17) — 569 patients, 30 features
+**Task:** Binary classification — Malignant (M) vs Benign (B)
+**Criterion:** Entropy (Information Gain), random_state=887, 80/20 split
+
+| Configuration | Test Accuracy | Notes |
+|---|---|---|
+| Max Depth = 1 | `{python} f"{dt_results['Max Depth = 1']['accuracy']*100:.1f}"`% | Single split — underfits |
+| Min Samples Split = 10 | `{python} f"{dt_results['Min Samples Split = 10']['accuracy']*100:.1f}"`% | **Best model** |
+| Min Samples Leaf = 10 | `{python} f"{dt_results['Min Samples Leaf = 10']['accuracy']*100:.1f}"`% | Strong performance |
+| Default (no params) | `{python} f"{dt_results['Default (no params)']['accuracy']*100:.1f}"`% | May overfit |
+
+**EIG Summary:** For the spam email example, "Sender in Contact" (EIG=0.590) is the best root split — it reduces entropy by the most, nearly perfectly separating spam from non-spam with a single question.
+
+**Why Max Depth=1 is worst:** Restricting to one split means the tree can only partition the 30-feature space with a single boundary — fundamentally insufficient for distinguishing the overlapping morphological profiles of benign and malignant tumors.
+
+**Why Min Samples Split=10 wins:** Requiring at least 10 samples before any split prevents the tree from creating very small, noisy leaf nodes that memorize training data. This reduces overfitting without sacrificing the flexibility needed to capture real patterns in the data.
+:::

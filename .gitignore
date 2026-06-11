@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# Claude / editor metadata
+.claude/
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.virtualenvs/
+
+# Quarto / rendered output (regenerated from the .qmd source)
+/.quarto/
+*.html
+Problem Set 6 Dashboard_files/
+Problem-Set-6-Dashboard_files/
+Files/Problem Set 6 Dashboard_files/
+Files/Problem-Set-6-Dashboard_files/

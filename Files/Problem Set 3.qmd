@@ -1,0 +1,112 @@
+---
+title: "Problem Set 3"
+author: "Arihaan Barua"
+date: now
+format: html
+editor: source
+self-contained: true
+---
+
+## Question 1
+
+Part (a)
+```{r}
+#| echo: false
+library(dplyr)
+library(Lahman)
+(bat_300_300 <- Batting %>%
+  group_by(playerID) %>%
+  summarise(
+    total_HR = sum(HR, na.rm = TRUE),
+    total_SB = sum(SB, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(total_HR >= 300, total_SB >= 300) %>%
+  left_join(People %>% select(playerID, nameFirst, nameLast), by = "playerID") %>%
+  select(nameFirst, nameLast, total_HR, total_SB) %>%
+  arrange(desc(total_HR), desc(total_SB), nameLast, nameFirst))
+```
+
+Part (b)
+```{r}
+#| echo: false
+(pitch_300_3000 <- Pitching %>%
+  group_by(playerID) %>%
+  summarise(
+    total_W  = sum(W,  na.rm = TRUE),
+    total_SO = sum(SO, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  filter(total_W >= 300, total_SO >= 3000) %>%
+  left_join(People %>% select(playerID, nameFirst, nameLast), by = "playerID") %>%
+  mutate(player = paste(nameFirst, nameLast)) %>%
+  select(player, total_W, total_SO) %>%
+  arrange(desc(total_W), desc(total_SO), player))
+```
+
+Part (c)
+```{r}
+#| echo: false
+(top5_hits <- Batting %>%
+  group_by(playerID) %>%
+  summarise(
+    total_H = sum(H, na.rm = TRUE),
+    start_year = min(yearID, na.rm = TRUE),
+    end_year   = max(yearID, na.rm = TRUE),
+    career_years = end_year - start_year + 1,
+    .groups = "drop"
+  ) %>%
+  left_join(People %>% select(playerID, nameFirst, nameLast), by = "playerID") %>%
+  arrange(desc(total_H)) %>%
+  slice(1:5) %>%
+  select(nameFirst, nameLast, career_years, total_H))
+```
+
+## Question 2
+
+Part (a)
+```{r}
+#| echo: false
+height_gpa <- read.table(
+  "https://online.stat.psu.edu/onlinecourses/sites/stat501/files/data/heightgpa.txt",
+  header = TRUE
+)
+plot(
+  gpa ~ height,
+  data = height_gpa,
+  xlab = "Height (inches)",
+  ylab = "GPA",
+  main = "Scatterplot of GPA vs Height"
+)
+```
+There appears to be a weak positive linear relationship, but the datapoints are pretty evenly spread out.
+
+Part (b)
+```{r}
+(cor(height_gpa$height, height_gpa$gpa))
+```
+
+Part (c)
+```{r}
+model <- lm(gpa ~ height, data = height_gpa)
+summary(model)
+```
+The estimated slope represents the change in mean GPA for every one-inch increase in height. In this dataset, the slope is very small, suggesting that height doesn't much effect on GPA.
+
+Part (d)
+```{r}
+#| echo: false
+par(mfrow = c(2, 2))
+plot(model)
+par(mfrow = c(1, 1))
+```
+
+Part (e)
+```{r}
+summary(model)$r.squared
+```
+The R^2 value is very small, meaning that height explains only a small proportion of the variability in GPA. This means that almost all variation in GPA is due to other factors.
+
+Part (f)
+
+This data set shows that there is little to no meaningful relationship between a student’s height and their GPA. Both the correlation coefficient and R^2 value indicate that height is not a useful predictor of academic performance in this sample.

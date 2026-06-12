@@ -1,6 +1,6 @@
 # Welcome {.unnumbered}
 
-This book is a portfolio of my work for **STAT 380 — Data Science** at Penn State. It collects three problem sets and five machine-learning assignments into a single, navigable reference, with every figure rebuilt as an **interactive [plotly](https://plotly.com/) visualization** and accompanied by a plain-language explanation of what the analysis is doing and why.
+This book is a portfolio containing a few of my machine learning projects from Penn State. It collects three problem sets and five machine-learning assignments into a single, navigable reference, with every figure rebuilt as an **interactive [plotly](https://plotly.com/) visualization** and accompanied by a plain-language explanation of what the analysis is doing and why.
 
 ## What's inside
 

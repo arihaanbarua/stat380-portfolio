@@ -1,4 +1,4 @@
-# Neural Network — Dry Bean Classification
+# Neural Networks: Bean Variety Classification
 
 ```{r}
 #| include: false
@@ -71,7 +71,7 @@ nn_cm     = confusion_matrix(nn_y_test, nn_y_pred, labels=nn_classes)
 nn_report = classification_report(nn_y_test, nn_y_pred, labels=nn_classes, output_dict=True)
 ```
 
-This chapter trains a **Multi-Layer Perceptron (MLP)** neural network to classify seven varieties of dry bean from 16 morphological features, tuning the architecture and regularization to maximize accuracy. It was completed as a class competition (worked on with Sabeeh and Ronish).
+This project trains a **Multi-Layer Perceptron (MLP)** neural network to classify seven varieties of dry bean from 16 morphological features, tuning the architecture and regularization to maximize accuracy. *(A collaborative project with Sabeeh and Ronish.)*
 
 ## Results
 

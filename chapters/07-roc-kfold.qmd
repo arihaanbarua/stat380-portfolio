@@ -1,4 +1,4 @@
-# ROC Curves & K-Fold Cross-Validation
+# ROC Curves & Cross-Validation
 
 ```{r}
 #| include: false

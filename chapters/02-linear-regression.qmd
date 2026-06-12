@@ -1,4 +1,4 @@
-# Problem Set 4: Insurance, Used Cars & NOVA Housing
+# Linear Regression & Model Selection
 
 ```{r}
 #| include: false
@@ -94,7 +94,7 @@ max_bath_obs  <- nova4_clean[max_bath_idx, ]
 max_bath_pred <- predict(model_bath, newdata = max_bath_obs)
 ```
 
-This problem set works through model selection and interpretation across three datasets: comparing **nested linear models** on insurance charges, applying a **prediction equation** to used-car prices, and performing **EDA plus regression** on Northern Virginia housing.
+This project works through model selection and interpretation across three datasets: comparing **nested linear models** on insurance charges, applying a **prediction equation** to used-car prices, and performing **EDA plus regression** on Northern Virginia housing.
 
 ## Q1 — Insurance Charges
 

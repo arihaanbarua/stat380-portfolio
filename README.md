@@ -1,22 +1,22 @@
-# STAT 380 Portfolio
+# Machine Learning Portfolio
 
-A [Quarto book](https://quarto.org/docs/books/) collecting a few of my machine learning projects from Penn State. It combines three problem sets and five machine-learning assignments into a single navigable book, with every figure rebuilt as an interactive [plotly](https://plotly.com/) visualization and a plain-language explanation of the analysis.
+A [Quarto book](https://quarto.org/docs/books/) collecting a series of **statistical modeling and machine-learning projects** in R and Python, from my time at Penn State. Each chapter takes a real dataset, builds and evaluates models, and rebuilds every figure as an interactive [plotly](https://plotly.com/) visualization with a plain-language explanation of the analysis.
 
-📖 **Live book:** https://arihaanbarua.github.io/stat380-portfolio/
+📖 **Live book:** https://arihaanbarua.github.io/machine-learning-portfolio/
 
 ## Contents
 
-### Part I — Regression & Statistics (R)
-- **Problem Set 3** — Lahman baseball career records (`dplyr` aggregation)
-- **Problem Set 4** — Insurance charges, used-car pricing, NOVA housing EDA & multiple regression
-- **Problem Set 6** — MLB salary (LASSO & backward elimination), linear regression vs kNN, NOVA housing kNN
+### Part I — Data Analysis & Regression (R)
+- **Data Wrangling** — querying baseball career records with `dplyr` (grouping, joining, filtering)
+- **Linear Regression & Model Selection** — insurance charges, used-car pricing, NOVA housing EDA & multiple regression
+- **Regularization & kNN** — MLB salary (LASSO & backward elimination), linear regression vs k-nearest-neighbors, housing prediction
 
 ### Part II — Machine Learning (Python)
 - **Gaussian Naïve Bayes** — Iris classification implemented from scratch
-- **Neural Network** — Dry Bean classification with `MLPClassifier`
-- **Random Forest** — Gini impurity & feature-importance comparison
-- **ROC & K-Fold** — Taiwanese bankruptcy prediction with cross-validation
-- **Decision Trees** — Breast-cancer diagnosis & information gain
+- **Neural Networks** — Dry Bean variety classification with `MLPClassifier`
+- **Random Forests** — Gini impurity & feature-importance comparison
+- **ROC & Cross-Validation** — corporate bankruptcy prediction with stratified k-fold
+- **Decision Trees** — breast-cancer diagnosis & information gain
 
 ## Project structure
 
@@ -24,16 +24,16 @@ A [Quarto book](https://quarto.org/docs/books/) collecting a few of my machine l
 .
 ├── _quarto.yml            # Book configuration
 ├── index.qmd              # Landing page / overview
-├── chapters/              # One self-contained chapter per assignment
-│   ├── 01-ps3-baseball.qmd
-│   ├── 02-ps4-regression.qmd
-│   ├── 03-ps6-models.qmd
+├── chapters/              # One self-contained chapter per topic
+│   ├── 01-data-wrangling.qmd
+│   ├── 02-linear-regression.qmd
+│   ├── 03-regularization-knn.qmd
 │   ├── 04-naive-bayes.qmd
 │   ├── 05-neural-network.qmd
 │   ├── 06-random-forest.qmd
 │   ├── 07-roc-kfold.qmd
 │   └── 08-decision-trees.qmd
-├── Files/                 # Datasets + original problem-set submissions (notebooks, PDFs)
+├── Files/                 # Datasets + original source notebooks & PDFs
 └── _book/                 # Rendered HTML output (git-ignored)
 ```
 
@@ -61,4 +61,4 @@ The machine-learning chapters pull benchmark datasets from the [UCI Machine Lear
 
 ## Author
 
-**Arihaan Barua** — Penn State, STAT 380
+**Arihaan Barua**

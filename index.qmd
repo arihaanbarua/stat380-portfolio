@@ -1,34 +1,34 @@
 # Welcome {.unnumbered}
 
-This book is a portfolio containing a few of my machine learning projects from Penn State. It collects three problem sets and five machine-learning assignments into a single, navigable reference, with every figure rebuilt as an **interactive [plotly](https://plotly.com/) visualization** and accompanied by a plain-language explanation of what the analysis is doing and why.
+This is a portfolio of **statistical modeling and machine-learning projects** built in R and Python during my time at Penn State. Each chapter takes a real dataset, builds and evaluates models, and rebuilds every figure as an **interactive [plotly](https://plotly.com/) visualization** — paired with a plain-language explanation of what the analysis is doing and why.
 
 ## What's inside
 
-The portfolio is organized into two parts.
+The work is grouped into two parts: foundational statistical modeling in R, and machine-learning models built in Python.
 
-### Part I — Regression & Statistics (R)
+### Part I — Data Analysis & Regression (R)
 
 Built with R, `tidyverse`, `glmnet`, and `FNN`.
 
-| Chapter | Topic | Key methods |
+| Chapter | Focus | Key methods |
 |---|---|---|
-| [Problem Set 3](chapters/01-ps3-baseball.qmd) | Baseball career records | `dplyr` aggregation, grouping & filtering |
-| [Problem Set 4](chapters/02-ps4-regression.qmd) | Insurance, used cars & NOVA housing | Nested model comparison, validation metrics (MSE/RMSE/MAE), multiple regression |
-| [Problem Set 6](chapters/03-ps6-models.qmd) | MLB salary, kNN & housing | LASSO, backward elimination, k-nearest-neighbors regression |
+| [Data Wrangling](chapters/01-data-wrangling.qmd) | Querying baseball career records | `dplyr` aggregation, grouping & filtering |
+| [Linear Regression](chapters/02-linear-regression.qmd) | Insurance, used cars & housing prices | Nested model comparison, validation metrics (MSE/RMSE/MAE), multiple regression |
+| [Regularization & kNN](chapters/03-regularization-knn.qmd) | Salary & housing prediction | LASSO, backward elimination, k-nearest-neighbors regression |
 
 ### Part II — Machine Learning (Python)
 
 Built with Python, `scikit-learn`, and `plotly`.
 
-| Chapter | Topic | Key methods |
+| Chapter | Focus | Key methods |
 |---|---|---|
 | [Gaussian Naïve Bayes](chapters/04-naive-bayes.qmd) | Iris classification from scratch | Gaussian likelihoods, Bayes' theorem, confusion matrix |
-| [Neural Network](chapters/05-neural-network.qmd) | Dry Bean classification | `MLPClassifier`, feature scaling, hyperparameter tuning |
-| [Random Forest](chapters/06-random-forest.qmd) | Gini impurity & feature importance | Decision trees, MDI vs permutation importance |
-| [ROC & K-Fold](chapters/07-roc-kfold.qmd) | Bankruptcy prediction | Stratified cross-validation, ROC/AUC, normalization |
-| [Decision Trees](chapters/08-decision-trees.qmd) | Breast cancer diagnosis | Entropy/information gain, hyperparameter effects |
+| [Neural Networks](chapters/05-neural-network.qmd) | Dry Bean variety classification | `MLPClassifier`, feature scaling, hyperparameter tuning |
+| [Random Forests](chapters/06-random-forest.qmd) | Gini impurity & feature importance | Decision trees, MDI vs permutation importance |
+| [ROC & Cross-Validation](chapters/07-roc-kfold.qmd) | Corporate bankruptcy prediction | Stratified k-fold, ROC/AUC, normalization |
+| [Decision Trees](chapters/08-decision-trees.qmd) | Breast-cancer diagnosis | Entropy/information gain, hyperparameter effects |
 
-## How to read this book
+## How to read this portfolio
 
 - Use the **sidebar** to jump between chapters, or the **search** box (top of the sidebar) to find a topic.
 - Most charts are **interactive** — hover for tooltips, click legend entries to toggle series, and drag to zoom.
@@ -36,8 +36,4 @@ Built with Python, `scikit-learn`, and `plotly`.
 
 ## Reproducibility
 
-Every chapter is self-contained and fully reproducible — each one loads its own data and computes its results at render time. Datasets live in the `Files/` directory of the [source repository](https://github.com/arihaanbarua/stat380-portfolio); the machine-learning chapters pull benchmark datasets directly from the [UCI Machine Learning Repository](https://archive.ics.uci.edu/).
-
-::: {.callout-note}
-This portfolio was reorganized from a single Quarto dashboard into a multi-chapter book for easier navigation and maintenance. The original problem-set submissions (notebooks, PDFs, and source `.qmd` files) are preserved in the `Files/` directory.
-:::
+Every chapter is self-contained and fully reproducible — each one loads its own data and computes its results at render time. Datasets live in the `Files/` directory of the [source repository](https://github.com/arihaanbarua/machine-learning-portfolio); the machine-learning chapters pull benchmark datasets directly from the [UCI Machine Learning Repository](https://archive.ics.uci.edu/).

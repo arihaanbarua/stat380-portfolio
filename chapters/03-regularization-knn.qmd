@@ -1,4 +1,4 @@
-# Problem Set 6: MLB Salary, kNN & Housing
+# Regularization & k-Nearest Neighbors
 
 ```{r}
 #| include: false
@@ -113,7 +113,7 @@ best_pred     <- knn.reg(train = X_train_nova, test = X_valid_nova, y = y_train_
 rmse_best_knn <- rmse(y_valid_nova, best_pred)
 ```
 
-This problem set focuses on **model selection and flexibility**: using regularization (LASSO) and stepwise selection to predict baseball salaries, contrasting a rigid linear fit against a flexible **k-nearest-neighbors** smoother on synthetic data, and tuning kNN on real housing data.
+This project focuses on **model selection and flexibility**: using regularization (LASSO) and stepwise selection to predict baseball salaries, contrasting a rigid linear fit against a flexible **k-nearest-neighbors** smoother on synthetic data, and tuning kNN on real housing data.
 
 ## Q1 — MLB Salary Prediction
 

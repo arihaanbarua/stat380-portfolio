@@ -1,4 +1,4 @@
-# Decision Trees — Medical Diagnosis
+# Decision Trees: Medical Diagnosis
 
 ```{r}
 #| include: false

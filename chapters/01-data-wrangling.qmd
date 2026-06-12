@@ -1,4 +1,4 @@
-# Problem Set 3: Baseball Records
+# Data Wrangling: Baseball Career Records
 
 ```{r}
 #| include: false
@@ -46,7 +46,7 @@ top5_hits <- Batting %>%
   select(nameFirst, nameLast, career_years, total_H)
 ```
 
-This problem set queries the historical **Lahman Baseball Database** with `dplyr` to surface the small groups of players who reached rare career milestones — combining different elite skills, dominating across decades, or sustaining production over very long careers.
+This project uses `dplyr` to query the historical **Lahman Baseball Database**, surfacing the small groups of players who reached rare career milestones — combining different elite skills, dominating across decades, or sustaining production over very long careers. It demonstrates data-wrangling fundamentals: grouping, aggregating, joining, and filtering across millions of records.
 
 ## Baseball Records
 

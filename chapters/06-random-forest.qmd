@@ -1,4 +1,4 @@
-# Random Forest — Gini & Feature Importance
+# Random Forests & Feature Importance
 
 ```{r}
 #| include: false
@@ -75,7 +75,7 @@ rf_gini_compare = pd.DataFrame({
 })
 ```
 
-This chapter explores the mechanics behind **decision trees and random forests**: how a split is chosen by minimizing **Gini impurity**, and how two different methods — **Mean Decrease in Impurity (MDI)** and **permutation importance** — can disagree about which features matter (worked on with Sabeeh, Ronish, and Nihal).
+This project explores the mechanics behind **decision trees and random forests**: how a split is chosen by minimizing **Gini impurity**, and how two different methods — **Mean Decrease in Impurity (MDI)** and **permutation importance** — can disagree about which features matter. *(A collaborative project with Sabeeh, Ronish, and Nihal.)*
 
 ## Gini Impurity & Data
 

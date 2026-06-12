@@ -4,23 +4,24 @@ project:
   output-dir: _book
 
 book:
-  title: "STAT 380 Portfolio"
-  subtitle: "Statistical Modeling & Machine Learning"
+  title: "Machine Learning Portfolio"
+  subtitle: "Statistical Modeling & Machine Learning Projects in R and Python"
   author: "Arihaan Barua"
   date: today
   search: true
-  repo-url: https://github.com/arihaanbarua/stat380-portfolio
+  site-url: https://arihaanbarua.github.io/machine-learning-portfolio/
+  repo-url: https://github.com/arihaanbarua/machine-learning-portfolio
   repo-actions: [source]
   sidebar:
     style: docked
     collapse-level: 1
   chapters:
     - index.qmd
-    - part: "Regression & Statistics (R)"
+    - part: "Data Analysis & Regression (R)"
       chapters:
-        - chapters/01-ps3-baseball.qmd
-        - chapters/02-ps4-regression.qmd
-        - chapters/03-ps6-models.qmd
+        - chapters/01-data-wrangling.qmd
+        - chapters/02-linear-regression.qmd
+        - chapters/03-regularization-knn.qmd
     - part: "Machine Learning (Python)"
       chapters:
         - chapters/04-naive-bayes.qmd
